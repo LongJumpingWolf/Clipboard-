@@ -1,0 +1,61 @@
+HOTDROP — VERCEL SETUP
+=======================
+
+1) Put ALL files from this folder in your GitHub repo.
+
+2) Import that GitHub repo into Vercel.
+
+3) Create/connect an Upstash Redis database.
+
+4) In Vercel > Project > Settings > Environment Variables add:
+   UPSTASH_REDIS_REST_URL
+   UPSTASH_REDIS_REST_TOKEN
+
+5) Redeploy.
+
+NO BUILD STEP IS REQUIRED
+-------------------------
+Homepage: index.html
+API:      /api/clipboard
+Icons:    /icons (favicon, apple/android/PWA icons, manifest — already linked from index.html)
+
+WHAT THIS VERSION ADDS
+-----------------------
+- Rebranded to HotDrop, with a full favicon/app-icon set in /icons
+- Text + images + general files
+- Whole-window drag and drop (not just the composer box), with a themed
+  full-screen "Drop it like it's hot" overlay while dragging
+- Tap/click anywhere on an item to act on it: copies text, copies images,
+  downloads files — buttons still work independently
+- Image thumbnails embedded directly in item metadata for instant preview;
+  full-quality bytes are only fetched on Copy image / Download
+- File-type icon badges (PDF, Word, Excel, PowerPoint, archive, audio,
+  video, code, image, generic), each with its own accent color
+- Multiple-file uploads, chunked file transfer
+- Download files on another device
+- Clipboard-image paste
+- Better connection/sync indicators
+- Storage usage meter
+- Oldest-first automatic cleanup when space is needed
+- 16 MB max per file
+- 32 MB per-room encoded storage target
+- 7-day room expiry
+
+HOW AUTO-CLEANUP WORKS
+-----------------------
+The server calculates room usage before accepting new content.
+If the new item will not fit, it removes the oldest items until enough
+space exists. This is automatic; you do not need to manually clear the room.
+
+HOW THUMBNAILS WORK
+--------------------
+When you upload an image, the browser generates a small JPEG thumbnail
+(~480px, capped around 45 KB) before upload and sends it alongside the
+file's metadata. Every device sees that thumbnail immediately on refresh
+with no extra download. The original file is stored and transferred at
+full quality as before, and is what "Copy image" / "Download" use.
+
+IMPORTANT
+---------
+The room code is effectively the room password. Anyone with the code can
+access its contents.
