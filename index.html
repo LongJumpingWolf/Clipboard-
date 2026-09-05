@@ -72,11 +72,14 @@
     .emptyTitle{font-size:13.5px;font-weight:650;color:#c9cdd6}
     .emptySub{font-size:11.5px;margin-top:4px}
 
-    .item{border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:9px;background:var(--panel);cursor:pointer;transition:border-color .12s ease,background .12s ease}
+    .item{border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:9px;background:var(--panel);cursor:pointer;transition:border-color .12s ease,background .12s ease;position:relative;overflow:hidden}
     .item:last-child{margin-bottom:0}
     .item:hover{border-color:#333a48}
     .item:active{background:#1d212b}
     .item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    .copyFlash{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:7px;background:rgba(14,16,22,.94);color:#fff;font-size:13px;font-weight:650;opacity:0;pointer-events:none;transition:opacity .15s ease;z-index:2;border-radius:13px}
+    .copyFlash.show{opacity:1}
+    .copyFlash svg{width:16px;height:16px;flex:none}
     .itemTop{display:flex;align-items:flex-start;gap:10px}
     .typeIcon{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex:none;border:1px solid rgba(255,255,255,.06)}
     .typeIcon.cat-text{background:#2a2119;color:#ff8a4c}
@@ -154,7 +157,7 @@
     .codeRow{display:flex;gap:9px}
     #codeInput{flex:1;min-width:0}
 
-    .toast{position:fixed;left:50%;bottom:78px;transform:translate(-50%,20px);background:#20242c;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 13px;font-size:12px;font-weight:600;opacity:0;pointer-events:none;transition:.18s ease;box-shadow:0 20px 50px rgba(0,0,0,.5);z-index:99;max-width:min(92vw,520px);text-align:center}
+    .toast{position:fixed;left:50%;top:16px;transform:translate(-50%,-14px);background:#20242c;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 13px;font-size:12px;font-weight:600;opacity:0;pointer-events:none;transition:.18s ease;box-shadow:0 20px 50px rgba(0,0,0,.5);z-index:99;max-width:min(92vw,520px);text-align:center}
     .toast.show{opacity:1;transform:translate(-50%,0)}
     .toast.bad{border-color:rgba(240,85,95,.4);color:#ffb3b6}
     .toast.warn{border-color:rgba(227,161,60,.4);color:#ffd699}
@@ -358,11 +361,13 @@
     finally{if(showBusy)setBusy(false);if(!uploadActive&&room&&navigator.onLine&&!document.hidden)schedulePoll();else updateOnlineState()}
   }
 
+  const CHECK_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>';
+  function flashCard(card,label){if(!card)return;let el=card.querySelector('.copyFlash');if(!el){el=document.createElement('div');el.className='copyFlash';el.innerHTML=CHECK_SVG+'<span></span>';card.appendChild(el)}el.querySelector('span').textContent=label;el.classList.add('show');clearTimeout(card._flashTimer);card._flashTimer=setTimeout(()=>el.classList.remove('show'),1000)}
   function button(label,handler,cls=''){const b=document.createElement('button');b.type='button';b.className=`btn small ${cls}`.trim();b.textContent=label;b.onclick=handler;return b}
   function fileUrlCached(item){return blobCache.get(item.id)||null}
   async function getBlob(item,onProgress){if(blobCache.has(item.id))return fetch(blobCache.get(item.id)).then(r=>r.blob());const parts=[];const total=Math.max(1,Number(item.chunks||1));for(let i=0;i<total;i++){parts.push(await fetchChunk(item.id,i));if(onProgress)onProgress((i+1)/total)}return new Blob(parts,{type:item.mime||'application/octet-stream'})}
   async function getBlobUrl(item,onProgress){if(blobCache.has(item.id))return blobCache.get(item.id);const blob=await getBlob(item,onProgress);const url=URL.createObjectURL(blob);blobCache.set(item.id,url);return url}
-  async function downloadItem(item,progressEl){try{setBusy(true);progressEl.textContent='Preparing 0%';const blob=await getBlob(item,p=>progressEl.textContent=`Preparing ${Math.round(p*100)}%`);const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=item.name||'download';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2500);progressEl.textContent='';toast('Download ready')}catch(e){progressEl.textContent='';toast(e.message||'Download failed','bad')}finally{setBusy(false);updateOnlineState()}}
+  async function downloadItem(item,progressEl,cardEl){try{setBusy(true);progressEl.textContent='Preparing 0%';const blob=await getBlob(item,p=>progressEl.textContent=`Preparing ${Math.round(p*100)}%`);const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=item.name||'download';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2500);progressEl.textContent='';toast('Download ready');flashCard(cardEl,'Downloaded')}catch(e){progressEl.textContent='';toast(e.message||'Download failed','bad')}finally{setBusy(false);updateOnlineState()}}
 
   function renderItems(items){const root=$('items');root.replaceChildren();$('feedCount').textContent=String(items.length);cleanupBlobCache(new Set(items.map(x=>x.id)));if(!items.length){const e=document.createElement('div');e.className='empty';e.innerHTML='<div class="emptyIcon">⇄</div><div class="emptyTitle">Nothing here yet</div><div class="emptySub">Paste text or drop a file above and it will appear on your other device.</div>';root.appendChild(e);return}
     [...items].sort((a,b)=>b.ts-a.ts).forEach(item=>{const cat=fileCategory(item);const card=document.createElement('article');card.className='item';card.tabIndex=0;const top=document.createElement('div');top.className='itemTop';const ico=document.createElement('div');ico.className='typeIcon cat-'+cat;ico.innerHTML=glyphFor(cat);const main=document.createElement('div');main.className='itemMain';const name=document.createElement('div');name.className='itemName';name.textContent=item.type==='text'?'Text snippet':(item.name||'File');const meta=document.createElement('div');meta.className='itemMeta';meta.textContent=`${new Date(item.ts).toLocaleString()}${item.type==='text'?'':` · ${fmtBytes(item.size)}`}`;main.append(name,meta);top.append(ico,main);card.appendChild(top);
@@ -372,13 +377,13 @@
         else{const msg=document.createElement('div');msg.className='previewMsg';msg.textContent=item.size<=PREVIEW_AUTO_BYTES?'Loading preview…':'Large image — tap to load preview.';wrap.appendChild(msg);const load=async()=>{if(wrap.querySelector('img'))return;try{const url=await getBlobUrl(item);wrap.replaceChildren();const img=document.createElement('img');img.src=url;img.alt=item.name||'Shared image';wrap.appendChild(img)}catch(e){msg.textContent='Preview unavailable.'}};if(item.size<=PREVIEW_AUTO_BYTES)load();else wrap.onclick=e=>{e.stopPropagation();load()}}
         card.appendChild(wrap)}
       const actions=document.createElement('div');actions.className='itemActions';const prog=document.createElement('span');prog.className='downloadProgress';
-      async function copyTextItem(){try{await navigator.clipboard.writeText(item.data);toast('Text copied')}catch(_){toast('Clipboard access was blocked','bad')}}
-      async function copyImageItem(){try{const blob=await getBlob(item,p=>prog.textContent=`Loading ${Math.round(p*100)}%`);if(!window.ClipboardItem||!navigator.clipboard?.write)throw new Error('Image copy is not supported by this browser.');await navigator.clipboard.write([new ClipboardItem({[blob.type||'image/png']:blob})]);toast('Image copied')}catch(err){toast(err.message||'Copy failed','bad')}finally{prog.textContent=''}}
+      async function copyTextItem(){try{await navigator.clipboard.writeText(item.data);toast('Text copied');flashCard(card,'Copied')}catch(_){toast('Clipboard access was blocked','bad')}}
+      async function copyImageItem(){try{const blob=await getBlob(item,p=>prog.textContent=`Loading ${Math.round(p*100)}%`);if(!window.ClipboardItem||!navigator.clipboard?.write)throw new Error('Image copy is not supported by this browser.');await navigator.clipboard.write([new ClipboardItem({[blob.type||'image/png']:blob})]);toast('Image copied');flashCard(card,'Copied')}catch(err){toast(err.message||'Copy failed','bad')}finally{prog.textContent=''}}
       if(item.type==='text'){actions.appendChild(button('Copy',async e=>{await copyTextItem();e.currentTarget.textContent='Copied';setTimeout(()=>e.currentTarget.textContent='Copy',1000)}))}
-      if(item.type==='image'){actions.appendChild(button('Copy image',async e=>{const b=e.currentTarget;b.disabled=true;await copyImageItem();b.disabled=false}));actions.appendChild(button('Download',()=>downloadItem(item,prog)))}
-      if(item.type==='file')actions.appendChild(button('Download',()=>downloadItem(item,prog),'primary'));
+      if(item.type==='image'){actions.appendChild(button('Copy image',async e=>{const b=e.currentTarget;b.disabled=true;const before=b.textContent;await copyImageItem();b.textContent='Copied';setTimeout(()=>b.textContent=before,1000);b.disabled=false}));actions.appendChild(button('Download',()=>downloadItem(item,prog,card)))}
+      if(item.type==='file')actions.appendChild(button('Download',()=>downloadItem(item,prog,card),'primary'));
       actions.appendChild(button('Delete',async e=>{const b=e.currentTarget;b.disabled=true;try{setBusy(true);await apiJson({method:'DELETE',body:JSON.stringify({room,id:item.id})});if(blobCache.has(item.id)){URL.revokeObjectURL(blobCache.get(item.id));blobCache.delete(item.id)}wakePolling();await refresh(false,false);toast('Deleted')}catch(err){toast(err.message||'Delete failed','bad')}finally{setBusy(false);b.disabled=false;updateOnlineState()}},'danger'));actions.appendChild(prog);card.appendChild(actions);
-      card.addEventListener('click',e=>{if(e.target.closest('.itemActions'))return;if(item.type==='text')copyTextItem();else if(item.type==='image')copyImageItem();else if(item.type==='file')downloadItem(item,prog)});
+      card.addEventListener('click',e=>{if(e.target.closest('.itemActions'))return;if(item.type==='text')copyTextItem();else if(item.type==='image')copyImageItem();else if(item.type==='file')downloadItem(item,prog,card)});
       card.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&!e.target.closest('.itemActions')){e.preventDefault();card.click()}});
       root.appendChild(card)})
   }
