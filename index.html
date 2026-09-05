@@ -275,7 +275,7 @@
   const DEFAULT_LIMITS = { maxFileBytes: 16*1024*1024, maxRoomBytes: 32*1024*1024, chunkBytes: 1536*1024, maxItems:120 };
   const PREVIEW_AUTO_BYTES = 2.5 * 1024 * 1024;
   const THUMB_MAX_DIM = 480, THUMB_QUALITY = 0.62;
-  let room = null, poller = null, busy = 0, lastSync = null, limits = {...DEFAULT_LIMITS}, latestItems = [];
+  let room = null, roomEpoch = 0, poller = null, busy = 0, lastSync = null, limits = {...DEFAULT_LIMITS}, latestItems = [];
   let toastTimer = null, uploadActive = false;
   const POLL_FAST = 3000, POLL_MEDIUM = 10000, POLL_SLOW = 20000;
   let idlePolls = 0, lastRoomSignature = '';
@@ -343,7 +343,7 @@
     const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),15000);
     try{const res=await fetch(options.url||API,{...options,signal:controller.signal,headers:{'Content-Type':'application/json',...(options.headers||{})}});let body={};try{body=await res.json()}catch(_){}if(!res.ok)throw new Error(body.error||`Request failed (${res.status})`);return body}finally{clearTimeout(timer)}
   }
-  async function fetchChunk(id,index){const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),20000);try{const res=await fetch(`${API}?room=${encodeURIComponent(room)}&id=${encodeURIComponent(id)}&chunk=${index}`,{signal:controller.signal,cache:'no-store'});if(!res.ok){let m=`Download failed (${res.status})`;try{const j=await res.json();m=j.error||m}catch(_){}throw new Error(m)}return await res.arrayBuffer()}finally{clearTimeout(timer)}}
+  async function fetchChunk(id,index){if(!room)throw new Error('No active room.');const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),20000);try{const res=await fetch(`${API}?room=${encodeURIComponent(room)}&id=${encodeURIComponent(id)}&chunk=${index}`,{signal:controller.signal,cache:'no-store'});if(!res.ok){let m=`Download failed (${res.status})`;try{const j=await res.json();m=j.error||m}catch(_){}throw new Error(m)}return await res.arrayBuffer()}finally{clearTimeout(timer)}}
 
   function applyStats(stats){if(!stats)return;limits={...limits,...stats};const pct=Math.min(100,(Number(stats.usageBytes||0)/Math.max(1,Number(stats.maxRoomBytes||limits.maxRoomBytes)))*100);$('usageFill').style.width=pct+'%';$('usageFill').className='usageFill'+(pct>92?' bad':pct>78?' warn':'');$('usageText').textContent=`${fmtBytes(stats.usageBytes)} / ${fmtBytes(stats.maxRoomBytes)} · ${stats.itemCount||0} items`;$('dropSub').textContent=`Drop or choose files · up to ${fmtBytes(stats.maxFileBytes||limits.maxFileBytes)} each · multiple files supported.`}
   function cleanupBlobCache(validIds){for(const [id,url] of blobCache){if(!validIds.has(id)){URL.revokeObjectURL(url);blobCache.delete(id)}}}
@@ -374,7 +374,7 @@
       if(item.type==='text'){const body=document.createElement('div');body.className='textBody';body.textContent=item.data;card.appendChild(body)}
       if(item.type==='image'){const wrap=document.createElement('div');wrap.className='imageWrap';
         if(item.thumb){const img=document.createElement('img');img.src=`data:image/jpeg;base64,${item.thumb}`;img.alt=item.name||'Shared image';img.loading='lazy';wrap.appendChild(img)}
-        else{const msg=document.createElement('div');msg.className='previewMsg';msg.textContent=item.size<=PREVIEW_AUTO_BYTES?'Loading preview…':'Large image — tap to load preview.';wrap.appendChild(msg);const load=async()=>{if(wrap.querySelector('img'))return;try{const url=await getBlobUrl(item);wrap.replaceChildren();const img=document.createElement('img');img.src=url;img.alt=item.name||'Shared image';wrap.appendChild(img)}catch(e){msg.textContent='Preview unavailable.'}};if(item.size<=PREVIEW_AUTO_BYTES)load();else wrap.onclick=e=>{e.stopPropagation();load()}}
+        else{const msg=document.createElement('div');msg.className='previewMsg';msg.textContent=item.size<=PREVIEW_AUTO_BYTES?'Loading preview…':'Large image — tap to load preview.';wrap.appendChild(msg);const loadEpoch=roomEpoch;const load=async()=>{if(wrap.querySelector('img'))return;if(!room||loadEpoch!==roomEpoch)return;try{const url=await getBlobUrl(item);if(loadEpoch!==roomEpoch)return;wrap.replaceChildren();const img=document.createElement('img');img.src=url;img.alt=item.name||'Shared image';wrap.appendChild(img)}catch(e){if(loadEpoch===roomEpoch)msg.textContent='Preview unavailable.'}};if(item.size<=PREVIEW_AUTO_BYTES)load();else wrap.onclick=e=>{e.stopPropagation();load()}}
         card.appendChild(wrap)}
       const actions=document.createElement('div');actions.className='itemActions';const prog=document.createElement('span');prog.className='downloadProgress';
       async function copyTextItem(){try{await navigator.clipboard.writeText(item.data);toast('Text copied');flashCard(card,'Copied')}catch(_){toast('Clipboard access was blocked','bad')}}
@@ -388,11 +388,12 @@
       root.appendChild(card)})
   }
 
-  function enterRoom(value){const v=normalizeRoom(value);if(!roomValid(v)){$('codeInput').value=v;$('codeInput').focus();toast('Use 3–64 letters, numbers, dashes or underscores.','warn');return}clearPoll();idlePolls=0;lastRoomSignature='';room=v;localStorage.setItem('hotdrop:lastRoom',v);$('roomLabel').textContent=`Room: ${v}`;$('joinPanel').classList.add('hidden');$('board').classList.remove('hidden');history.replaceState(null,'','#'+encodeURIComponent(v));setSync('busy','Connecting…','Checking room');renderQr();refresh(true,false)}
-  function leaveRoom(){clearPoll();idlePolls=0;lastRoomSignature='';room=null;latestItems=[];for(const url of blobCache.values())URL.revokeObjectURL(url);blobCache.clear();$('board').classList.add('hidden');$('joinPanel').classList.remove('hidden');history.replaceState(null,'',location.pathname+location.search);const qc=$('qrCode');if(qc)qc.innerHTML='';$('codeInput').focus()}
+  function enterRoom(value){const v=normalizeRoom(value);if(!roomValid(v)){$('codeInput').value=v;$('codeInput').focus();toast('Use 3–64 letters, numbers, dashes or underscores.','warn');return}clearPoll();idlePolls=0;lastRoomSignature='';roomEpoch++;room=v;localStorage.setItem('hotdrop:lastRoom',v);$('roomLabel').textContent=`Room: ${v}`;$('joinPanel').classList.add('hidden');$('board').classList.remove('hidden');history.replaceState(null,'','#'+encodeURIComponent(v));setSync('busy','Connecting…','Checking room');renderQr();refresh(true,false)}
+  function leaveRoom(){clearPoll();idlePolls=0;lastRoomSignature='';roomEpoch++;room=null;latestItems=[];for(const url of blobCache.values())URL.revokeObjectURL(url);blobCache.clear();$('board').classList.add('hidden');$('joinPanel').classList.remove('hidden');history.replaceState(null,'',location.pathname+location.search);const qc=$('qrCode');if(qc)qc.innerHTML='';$('codeInput').focus()}
 
   async function addText(){const val=$('textInput').value;if(!val.trim())return;setBusy(true);setNotice('Sending text…');try{const r=await apiJson({method:'POST',body:JSON.stringify({room,action:'addText',item:{id:uid(),type:'text',data:val,ts:Date.now()}})});$('textInput').value='';applyStats(r.stats);const n=(r.evicted||[]).length;setNotice(n?`Sent. Removed ${n} older item${n===1?'':'s'} to make space.`:'Sent and synced.','good');if(n)toast(`Made space by removing ${n} old item${n===1?'':'s'}`,'warn');wakePolling();await refresh(false,false)}catch(e){setNotice(e.message||'Could not send text.','bad')}finally{setBusy(false);updateOnlineState()}}
 
+  const MAX_THUMB_CHARS = 58 * 1024; // stay safely under the server's 60KB cap
   function makeThumbnail(file){
     return new Promise(resolve=>{
       if(!file.type.startsWith('image/')){resolve(null);return}
@@ -401,14 +402,21 @@
       const done=v=>{URL.revokeObjectURL(url);resolve(v)};
       img.onload=()=>{
         try{
-          let w=img.naturalWidth,h=img.naturalHeight;
-          if(!w||!h){done(null);return}
-          if(w>h){if(w>THUMB_MAX_DIM){h=Math.round(h*THUMB_MAX_DIM/w);w=THUMB_MAX_DIM}}
-          else{if(h>THUMB_MAX_DIM){w=Math.round(w*THUMB_MAX_DIM/h);h=THUMB_MAX_DIM}}
-          const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
-          const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0,w,h);
-          const dataUrl=canvas.toDataURL('image/jpeg',THUMB_QUALITY);
-          done(dataUrl.indexOf(',')>=0?dataUrl.split(',')[1]:null);
+          const naturalW=img.naturalWidth,naturalH=img.naturalHeight;
+          if(!naturalW||!naturalH){done(null);return}
+          const attempts=[[THUMB_MAX_DIM,THUMB_QUALITY],[320,0.55],[220,0.5]];
+          let best=null;
+          for(const [maxDim,quality] of attempts){
+            let w=naturalW,h=naturalH;
+            if(w>h){if(w>maxDim){h=Math.round(h*maxDim/w);w=maxDim}}
+            else{if(h>maxDim){w=Math.round(w*maxDim/h);h=maxDim}}
+            const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+            const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0,w,h);
+            const dataUrl=canvas.toDataURL('image/jpeg',quality);
+            const b64=dataUrl.indexOf(',')>=0?dataUrl.split(',')[1]:null;
+            if(b64&&b64.length<=MAX_THUMB_CHARS){best=b64;break}
+          }
+          done(best); // null if even the smallest attempt didn't fit — upload proceeds without a thumbnail
         }catch(_){done(null)}
       };
       img.onerror=()=>done(null);

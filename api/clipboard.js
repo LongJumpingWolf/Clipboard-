@@ -172,11 +172,6 @@ function validateBinaryMeta(item) {
   }
   const expectedChunks = Math.max(1, Math.ceil(size / CHUNK_BYTES));
   if (!Number.isInteger(chunks) || chunks !== expectedChunks) return 'Invalid chunk count.';
-  if (item.thumb !== undefined && item.thumb !== null) {
-    if (item.type !== 'image') return 'Thumbnails are only supported for images.';
-    if (typeof item.thumb !== 'string' || item.thumb.length > MAX_THUMB_CHARS) return 'Thumbnail is too large.';
-    if (item.thumb && !/^[A-Za-z0-9+/]+={0,2}$/.test(item.thumb)) return 'Invalid thumbnail encoding.';
-  }
   return null;
 }
 
@@ -319,7 +314,8 @@ module.exports = async function handler(req, res) {
         const itemError = validateBinaryMeta(item);
         if (itemError) return sendError(res, 400, itemError);
 
-        const hasThumb = item.type === 'image' && typeof item.thumb === 'string' && item.thumb.length > 0;
+        const hasThumb = item.type === 'image' && typeof item.thumb === 'string' && item.thumb.length > 0
+          && item.thumb.length <= MAX_THUMB_CHARS && /^[A-Za-z0-9+/]+={0,2}$/.test(item.thumb);
         const thumbBytes = hasThumb ? item.thumb.length + 48 : 0;
         const storedBytes = encodedBytesForSource(item.size) + (Number(item.chunks) * 160) + 512 + thumbBytes;
         if (storedBytes > MAX_ROOM_BYTES) return sendError(res, 400, 'File is too large for this room.');
