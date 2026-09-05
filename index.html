@@ -31,6 +31,9 @@
 
     /* App shell: fixed-height column. Feed scrolls; header + composer stay put. */
     .app{height:100vh;display:flex;flex-direction:column;max-width:640px;margin:0 auto}
+    .boardGrid{flex:1;min-height:0;display:flex;flex-direction:column}
+    .mainCol{flex:1;min-height:0;display:flex;flex-direction:column}
+    .sideCol{display:none}
 
     .topbar{flex:none;display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)}
     .logo{width:30px;height:30px;border-radius:9px;flex:none;display:block;object-fit:contain}
@@ -160,6 +163,22 @@
     .dropOverlay::before{content:'';position:absolute;inset:16px;border:2px dashed var(--accent);border-radius:26px}
     .dropOverlayCard{position:relative;font-size:16px;font-weight:650;color:#fff;background:rgba(24,17,13,.65);border:1px solid rgba(255,138,76,.4);padding:14px 24px;border-radius:14px;letter-spacing:-.01em}
 
+    @media(min-width:980px){
+      .app{max-width:1040px}
+      .boardGrid{flex-direction:row}
+      .mainCol{flex:0 0 640px;max-width:640px;border-right:1px solid var(--line)}
+      .sideCol{display:flex;flex-direction:column;gap:14px;flex:1;min-width:280px;padding:20px 4px 20px 20px;overflow-y:auto}
+      .sideTitle{font-size:12px;font-weight:650;color:var(--muted);margin-bottom:10px}
+      .qrPanel{padding:18px;text-align:center}
+      .qrCode{display:flex;justify-content:center;margin:2px 0 12px}
+      .qrCode img,.qrCode canvas,.qrCode table{border-radius:10px;background:#fff;padding:8px}
+      .qrHint{font-size:11px;color:var(--muted)}
+      .snapshotPanel{padding:18px}
+      .snapRow{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;padding:6px 0;color:var(--text)}
+      .snapRow span:first-child{color:var(--muted)}
+      .snapDivider{height:1px;background:var(--line);margin:6px 0}
+    }
+
     @media(max-width:520px){
       .composerActions .spacer{display:none}
       .dropRight{display:none}
@@ -182,7 +201,8 @@
       </div>
     </div>
 
-    <div id="board" class="hidden" style="display:contents">
+    <div id="board" class="hidden boardGrid">
+      <div class="mainCol">
       <div class="topbar">
         <img class="logo" src="icons/icon-64.png" width="30" height="30" alt="HotDrop" />
         <span class="brand">HotDrop</span>
@@ -221,11 +241,30 @@
         <div id="uploadBox" class="uploadBox hidden"><div class="uploadTop"><span id="uploadName" class="uploadName"></span><span id="uploadPct" class="uploadPct"></span></div><div class="progressTrack"><div id="progressFill" class="progressFill"></div></div></div>
         <div id="notice" class="notice">Older items are removed automatically only when needed to make room for new content.</div>
       </div>
+      </div>
+
+      <aside class="sideCol">
+        <div class="panel qrPanel">
+          <div class="sideTitle">Join from another device</div>
+          <div id="qrCode" class="qrCode"></div>
+          <div class="qrHint">Scan to open this room</div>
+        </div>
+        <div class="panel snapshotPanel">
+          <div class="sideTitle">Session snapshot</div>
+          <div class="snapRow"><span>Text</span><span id="snapText">0</span></div>
+          <div class="snapRow"><span>Images</span><span id="snapImage">0</span></div>
+          <div class="snapRow"><span>Files</span><span id="snapFile">0</span></div>
+          <div class="snapDivider"></div>
+          <div class="snapRow"><span>Storage used</span><span id="snapStorage">—</span></div>
+          <div class="snapRow"><span>Last activity</span><span id="snapLastActive">—</span></div>
+        </div>
+      </aside>
     </div>
   </div>
   <div id="toast" class="toast" aria-live="polite"></div>
   <div id="dropOverlay" class="dropOverlay hidden" aria-hidden="true"><div class="dropOverlayCard">Drop it like it's hot</div></div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
@@ -245,6 +284,10 @@
   function uid(){return crypto.randomUUID ? crypto.randomUUID() : Date.now()+'-'+Math.random().toString(36).slice(2)}
   function fmtBytes(n){n=Number(n||0);if(n<1024)return `${n} B`;if(n<1024**2)return `${(n/1024).toFixed(n<10240?1:0)} KB`;return `${(n/1024**2).toFixed(n<10*1024**2?1:0)} MB`}
   function fmtAge(date){if(!date)return 'Not synced yet';const sec=Math.max(0,Math.round((Date.now()-date)/1000));if(sec<5)return 'Synced just now';if(sec<60)return `Synced ${sec}s ago`;return `Synced ${Math.floor(sec/60)}m ago`}
+  function fmtSince(ts){if(!ts)return 'No activity yet';const sec=Math.max(0,Math.round((Date.now()-ts)/1000));if(sec<5)return 'Just now';if(sec<60)return `${sec}s ago`;if(sec<3600)return `${Math.floor(sec/60)}m ago`;return `${Math.floor(sec/3600)}h ago`}
+  let qrInstance=null;
+  function renderQr(){const el=$('qrCode');if(!el||!room)return;el.innerHTML='';const link=`${location.origin}${location.pathname}#${encodeURIComponent(room)}`;if(window.QRCode){qrInstance=new QRCode(el,{text:link,width:132,height:132,colorDark:'#111318',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M})}else{el.textContent='QR unavailable — use Copy link instead.'}}
+  function renderSnapshot(items,stats){const counts={text:0,image:0,file:0};(items||[]).forEach(i=>{if(counts[i.type]!==undefined)counts[i.type]++});const t=$('snapText'),im=$('snapImage'),f=$('snapFile'),st=$('snapStorage'),la=$('snapLastActive');if(t)t.textContent=String(counts.text);if(im)im.textContent=String(counts.image);if(f)f.textContent=String(counts.file);if(st&&stats)st.textContent=`${fmtBytes(stats.usageBytes)} / ${fmtBytes(stats.maxRoomBytes)}`;const latest=(items&&items.length)?Math.max(...items.map(i=>Number(i.ts||0))):0;if(la)la.textContent=fmtSince(latest)}
   function extOf(name){const p=String(name||'').split('.');return p.length>1?p.pop().toLowerCase():''}
   const EXT_GROUPS={pdf:['pdf'],doc:['doc','docx','odt','rtf'],xls:['xls','xlsx','ods','csv'],ppt:['ppt','pptx','odp','key'],zip:['zip','rar','7z','tar','gz','tgz','bz2'],audio:['mp3','wav','flac','m4a','aac','ogg','opus','wma'],video:['mp4','mov','webm','mkv','avi','m4v','wmv'],code:['js','jsx','ts','tsx','py','html','htm','css','scss','json','md','c','cpp','h','java','go','rb','php','sh','yml','yaml','xml','sql','swift','kt']};
   function fileCategory(item){if(item.type==='text')return 'text';if(item.type==='image')return 'image';const ext=extOf(item.name);for(const cat in EXT_GROUPS)if(EXT_GROUPS[cat].includes(ext))return cat;return 'generic'}
@@ -310,7 +353,7 @@
       latestItems=Array.isArray(data.items)?data.items:[];
       const sig=roomSignature(latestItems,data.stats);
       if(lastRoomSignature&&sig===lastRoomSignature){if(fromPoll)idlePolls=Math.min(99,idlePolls+1)}else{idlePolls=0;lastRoomSignature=sig}
-      applyStats(data.stats);renderItems(latestItems);lastSync=new Date();
+      applyStats(data.stats);renderItems(latestItems);renderSnapshot(latestItems,data.stats);lastSync=new Date();
     }catch(e){setSync('bad',navigator.onLine?'Sync problem':'Offline',e.name==='AbortError'?'Request timed out':e.message);if(showBusy)toast(e.message||'Could not sync','bad')}
     finally{if(showBusy)setBusy(false);if(!uploadActive&&room&&navigator.onLine&&!document.hidden)schedulePoll();else updateOnlineState()}
   }
@@ -340,8 +383,8 @@
       root.appendChild(card)})
   }
 
-  function enterRoom(value){const v=normalizeRoom(value);if(!roomValid(v)){$('codeInput').value=v;$('codeInput').focus();toast('Use 3–64 letters, numbers, dashes or underscores.','warn');return}clearPoll();idlePolls=0;lastRoomSignature='';room=v;localStorage.setItem('hotdrop:lastRoom',v);$('roomLabel').textContent=`Room: ${v}`;$('joinPanel').classList.add('hidden');$('board').classList.remove('hidden');history.replaceState(null,'','#'+encodeURIComponent(v));setSync('busy','Connecting…','Checking room');refresh(true,false)}
-  function leaveRoom(){clearPoll();idlePolls=0;lastRoomSignature='';room=null;latestItems=[];for(const url of blobCache.values())URL.revokeObjectURL(url);blobCache.clear();$('board').classList.add('hidden');$('joinPanel').classList.remove('hidden');history.replaceState(null,'',location.pathname+location.search);$('codeInput').focus()}
+  function enterRoom(value){const v=normalizeRoom(value);if(!roomValid(v)){$('codeInput').value=v;$('codeInput').focus();toast('Use 3–64 letters, numbers, dashes or underscores.','warn');return}clearPoll();idlePolls=0;lastRoomSignature='';room=v;localStorage.setItem('hotdrop:lastRoom',v);$('roomLabel').textContent=`Room: ${v}`;$('joinPanel').classList.add('hidden');$('board').classList.remove('hidden');history.replaceState(null,'','#'+encodeURIComponent(v));setSync('busy','Connecting…','Checking room');renderQr();refresh(true,false)}
+  function leaveRoom(){clearPoll();idlePolls=0;lastRoomSignature='';room=null;latestItems=[];for(const url of blobCache.values())URL.revokeObjectURL(url);blobCache.clear();$('board').classList.add('hidden');$('joinPanel').classList.remove('hidden');history.replaceState(null,'',location.pathname+location.search);const qc=$('qrCode');if(qc)qc.innerHTML='';$('codeInput').focus()}
 
   async function addText(){const val=$('textInput').value;if(!val.trim())return;setBusy(true);setNotice('Sending text…');try{const r=await apiJson({method:'POST',body:JSON.stringify({room,action:'addText',item:{id:uid(),type:'text',data:val,ts:Date.now()}})});$('textInput').value='';applyStats(r.stats);const n=(r.evicted||[]).length;setNotice(n?`Sent. Removed ${n} older item${n===1?'':'s'} to make space.`:'Sent and synced.','good');if(n)toast(`Made space by removing ${n} old item${n===1?'':'s'}`,'warn');wakePolling();await refresh(false,false)}catch(e){setNotice(e.message||'Could not send text.','bad')}finally{setBusy(false);updateOnlineState()}}
 
