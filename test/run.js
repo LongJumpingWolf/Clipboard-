@@ -417,6 +417,44 @@ async function main() {
   }
 
   // ---------------------------------------------------------------
+  section('Reset room');
+  {
+    const room = 'reset-' + uid();
+    await test('resetRoom deletes all items and blob data', async () => {
+      await addTextItem(room, 'will be wiped', Date.now());
+      const { finishRes } = await uploadFullFile(room, { name: 'wipeme.bin', mime: 'application/octet-stream', type: 'file', sizeBytes: 4096 });
+      assert.strictEqual(finishRes.statusCode, 200);
+      const before = await listRoom(room);
+      assert.strictEqual(before.body.items.length, 2);
+
+      const res = await post(room, 'resetRoom');
+      assert.strictEqual(res.statusCode, 200);
+      assert.strictEqual(res.body.removed, 2);
+      assert.strictEqual(res.body.stats.usageBytes, 0);
+
+      const after = await listRoom(room);
+      assert.strictEqual(after.body.items.length, 0);
+      assert.strictEqual(after.body.stats.usageBytes, 0);
+    });
+
+    await test('resetRoom on an already-empty room is a harmless no-op', async () => {
+      const room2 = 'reset-empty-' + uid();
+      const res = await post(room2, 'resetRoom');
+      assert.strictEqual(res.statusCode, 200);
+      assert.strictEqual(res.body.removed, 0);
+    });
+
+    await test('room can be used normally again immediately after a reset', async () => {
+      await post(room, 'resetRoom');
+      const r = await addTextItem(room, 'fresh start', Date.now());
+      assert.strictEqual(r.statusCode, 201);
+      const listed = await listRoom(room);
+      assert.strictEqual(listed.body.items.length, 1);
+      assert.strictEqual(listed.body.items[0].data, 'fresh start');
+    });
+  }
+
+  // ---------------------------------------------------------------
   section('Benchmark: throughput under realistic load');
   {
     const room = 'perf-' + uid();

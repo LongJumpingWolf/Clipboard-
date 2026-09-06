@@ -12,6 +12,7 @@ A lightweight cross-device drop for moving **text, images, and files** between y
 - Instant copy: full-quality image blobs are cached after first fetch and quietly prefetched in the background as items appear, so Copy/Download is usually instant instead of waiting on a network round-trip
 - **Settings screen** (gear icon, top-right) for image compression: ask every time, always compress over a size threshold to a set quality, or never compress
 - **Pin items** to protect them from the automatic storage cleanup — pinned items are only evicted as an absolute last resort if a room is completely full of pinned content
+- **Reset a room** — a Settings-screen "Danger zone" button that permanently deletes every item in the current room (for every device using it), behind a confirmation step
 - **Room expiry countdown** and a **recent rooms** list on the join screen for one-tap switching between rooms you use often
 - **Share sheet integration** (Android/Chrome installs only) — share a photo or link into HotDrop directly from any other app via the OS share sheet
 - Multiple file selection, clipboard-image paste support

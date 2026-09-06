@@ -447,6 +447,22 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ ok: true, pinned: meta.pinned });
       }
 
+      if (action === 'resetRoom') {
+        const all = parseHashResult(await redisCommand(['HGETALL', key]));
+        const blobKeys = [];
+        all.forEach(meta => {
+          if (meta.type === 'image' || meta.type === 'file') {
+            const chunks = Math.max(1, Number(meta.chunks || 1));
+            for (let i = 0; i < chunks; i++) blobKeys.push(blobKey(room, meta.id, i));
+          }
+        });
+        const commands = [['DEL', key]];
+        if (blobKeys.length) commands.push(['DEL', ...blobKeys]);
+        await redisPipeline(commands);
+        setJsonHeaders(res);
+        return res.status(200).json({ ok: true, removed: all.length, stats: roomStats([], null) });
+      }
+
       return sendError(res, 400, 'Unknown action.');
     }
 

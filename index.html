@@ -198,6 +198,8 @@
     .settingsNote{font-size:11px;color:var(--muted);line-height:1.5;margin-top:12px}
     .checkRow{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);cursor:pointer}
     .checkRow input{accent-color:var(--accent);width:15px;height:15px}
+    .dangerZone{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+    .dangerZone .settingsRow{display:flex;align-items:center;justify-content:space-between;gap:14px}
 
     @media(min-width:980px){
       .app{max-width:1040px}
@@ -326,8 +328,28 @@
           <div class="settingsInline"><input id="compQuality" type="range" min="30" max="95" step="5"><span id="compQualityLabel">70%</span></div>
         </div>
         <div class="settingsNote">Compression re-encodes images as JPEG and caps the longest edge at 2400px. Transparent areas become solid white, since JPEG doesn't support transparency. The original file on your device is never modified — only the uploaded copy is affected.</div>
+        <div class="dangerZone">
+          <div class="settingsLabel" style="color:var(--bad)">Danger zone</div>
+          <div class="settingsRow" style="border-top:none;padding-top:0">
+            <div><div style="font-size:12.5px">Reset this room</div><div class="settingsNote" style="margin-top:2px">Deletes every item in this room for everyone. Cannot be undone.</div></div>
+            <button id="resetRoomBtn" class="btn small danger" type="button">Reset room</button>
+          </div>
+        </div>
       </div>
       <div class="modalFoot"><button id="settingsSave" class="btn primary" type="button">Save</button></div>
+    </div>
+  </div>
+
+  <div id="resetRoomOverlay" class="modalOverlay hidden">
+    <div class="modalCard modalCardSmall">
+      <div class="modalHead"><span>Reset this room?</span></div>
+      <div class="modalBody">
+        <div id="resetRoomText" class="settingsNote" style="margin:0"></div>
+      </div>
+      <div class="modalFoot" style="justify-content:space-between">
+        <button id="resetRoomCancel" class="btn ghost" type="button">Cancel</button>
+        <button id="resetRoomConfirm" class="btn danger" type="button">Delete everything</button>
+      </div>
     </div>
   </div>
 
@@ -345,6 +367,12 @@
     </div>
   </div>
 
+<script>
+  // Required for the app to register as a real installed PWA on Android (see sw.js for why).
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); });
+  }
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 (() => {
@@ -657,6 +685,31 @@
     const quality=Math.min(95,Math.max(30,Number($('compQuality').value)||DEFAULT_SETTINGS.compressionQuality));
     saveSettings({compressionMode:mode,compressionThresholdMB:thresholdMB,compressionQuality:quality});
     toast('Settings saved');closeSettings();
+  };
+  $('resetRoomBtn').onclick=()=>{
+    const n=latestItems.length;
+    $('resetRoomText').textContent=n?`This will permanently delete all ${n} item${n===1?'':'s'} in this room, for every device using it. This cannot be undone.`:'This room is already empty.';
+    $('resetRoomConfirm').disabled=n===0;
+    closeSettings();
+    $('resetRoomOverlay').classList.remove('hidden');
+  };
+  $('resetRoomCancel').onclick=()=>{$('resetRoomOverlay').classList.add('hidden')};
+  $('resetRoomOverlay').addEventListener('click',e=>{if(e.target.id==='resetRoomOverlay')$('resetRoomOverlay').classList.add('hidden')});
+  $('resetRoomConfirm').onclick=async()=>{
+    const btn=$('resetRoomConfirm');btn.disabled=true;
+    try{
+      setBusy(true);
+      const r=await apiJson({method:'POST',body:JSON.stringify({room,action:'resetRoom'})});
+      for(const url of blobCache.values())URL.revokeObjectURL(url);
+      blobCache.clear();
+      $('resetRoomOverlay').classList.add('hidden');
+      wakePolling();await refresh(false,false);
+      toast(`Room reset — ${r.removed||0} item${(r.removed||0)===1?'':'s'} removed`);
+    }catch(err){
+      toast(err.message||'Could not reset room','bad');
+    }finally{
+      setBusy(false);btn.disabled=false;updateOnlineState();
+    }
   };
   const dz=$('dropZone'),fi=$('fileInput');dz.onclick=()=>fi.click();dz.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fi.click()}});fi.onchange=e=>{const files=e.target.files;e.target.value='';processFiles(files)};
   ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();e.stopPropagation();dz.classList.add('drag')}));['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();e.stopPropagation();dz.classList.remove('drag')}));dz.addEventListener('drop',e=>processFiles(e.dataTransfer.files));
