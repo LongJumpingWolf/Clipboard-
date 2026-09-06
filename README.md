@@ -9,6 +9,8 @@ A lightweight cross-device drop for moving **text, images, and files** between y
 - Tap/click anywhere on an item to act on it instantly: copies text, copies images, downloads files (Telegram-style)
 - Instant image previews via an embedded thumbnail — full-quality bytes are only fetched when you copy or download
 - File-type icons (PDF, Word, Excel, PowerPoint, archive, audio, video, code, image, generic) with distinct colors
+- Instant copy: full-quality image blobs are cached after first fetch and quietly prefetched in the background as items appear, so Copy/Download is usually instant instead of waiting on a network round-trip
+- **Settings screen** (gear icon, top-right) for image compression: ask every time, always compress over a size threshold to a set quality, or never compress
 - Multiple file selection, clipboard-image paste support
 - Chunked binary uploads/downloads
 - File downloads on the receiving device

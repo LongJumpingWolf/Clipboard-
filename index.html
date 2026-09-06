@@ -166,6 +166,29 @@
     .dropOverlay::before{content:'';position:absolute;inset:16px;border:2px dashed var(--accent);border-radius:26px}
     .dropOverlayCard{position:relative;font-size:16px;font-weight:650;color:#fff;background:rgba(24,17,13,.65);border:1px solid rgba(255,138,76,.4);padding:14px 24px;border-radius:14px;letter-spacing:-.01em}
 
+    .gearBtn{width:32px;height:32px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);display:grid;place-items:center;cursor:pointer}
+    .gearBtn:hover{color:var(--text);border-color:#333a48}
+    .gearBtn svg{width:16px;height:16px}
+    .gearBtnFixed{position:fixed;top:14px;right:14px;z-index:40}
+
+    .modalOverlay{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(8,9,13,.6);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);padding:20px}
+    .modalCard{width:min(420px,100%);background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;max-height:88vh;display:flex;flex-direction:column}
+    .modalCardSmall{width:min(380px,100%)}
+    .modalHead{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line);font-size:14px;font-weight:650}
+    .modalBody{padding:16px;overflow-y:auto}
+    .modalFoot{padding:12px 16px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+    .settingsLabel{font-size:12px;font-weight:650;color:var(--muted);margin-bottom:8px}
+    .radioRow{display:flex;align-items:center;gap:9px;padding:8px 0;font-size:13px;cursor:pointer}
+    .radioRow input{accent-color:var(--accent);width:16px;height:16px;flex:none}
+    .settingsRow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-top:1px solid var(--line);font-size:12.5px;margin-top:4px}
+    .settingsInline{display:flex;align-items:center;gap:8px}
+    .settingsInline .input.small{width:60px;padding:7px 9px;font-size:12.5px;text-align:center}
+    .settingsInline input[type=range]{accent-color:var(--accent);width:120px}
+    .settingsInline input:disabled{opacity:.4;cursor:not-allowed}
+    .settingsNote{font-size:11px;color:var(--muted);line-height:1.5;margin-top:12px}
+    .checkRow{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);cursor:pointer}
+    .checkRow input{accent-color:var(--accent);width:15px;height:15px}
+
     @media(min-width:980px){
       .app{max-width:1040px}
       .boardGrid{flex-direction:row}
@@ -267,6 +290,46 @@
   <div id="toast" class="toast" aria-live="polite"></div>
   <div id="dropOverlay" class="dropOverlay hidden" aria-hidden="true"><div class="dropOverlayCard">Drop it like it's hot</div></div>
 
+  <button id="settingsBtn" class="gearBtn gearBtnFixed" type="button" aria-label="Settings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+  </button>
+
+  <div id="settingsOverlay" class="modalOverlay hidden">
+    <div class="modalCard">
+      <div class="modalHead"><span>Settings</span><button id="settingsClose" class="btn small ghost" type="button">Close</button></div>
+      <div class="modalBody">
+        <div class="settingsLabel">When sharing large images</div>
+        <label class="radioRow"><input type="radio" name="compMode" id="compAsk" value="ask"><span>Ask me each time</span></label>
+        <label class="radioRow"><input type="radio" name="compMode" id="compAlways" value="always"><span>Always compress automatically</span></label>
+        <label class="radioRow"><input type="radio" name="compMode" id="compNever" value="never"><span>Never compress — always send full size</span></label>
+        <div class="settingsRow">
+          <label for="compThreshold">Compress images larger than</label>
+          <div class="settingsInline"><input id="compThreshold" type="number" min="1" max="16" step="1" class="input small"><span>MB</span></div>
+        </div>
+        <div class="settingsRow">
+          <label for="compQuality">Compression quality</label>
+          <div class="settingsInline"><input id="compQuality" type="range" min="30" max="95" step="5"><span id="compQualityLabel">70%</span></div>
+        </div>
+        <div class="settingsNote">Compression re-encodes images as JPEG and caps the longest edge at 2400px. Transparent areas become solid white, since JPEG doesn't support transparency. The original file on your device is never modified — only the uploaded copy is affected.</div>
+      </div>
+      <div class="modalFoot"><button id="settingsSave" class="btn primary" type="button">Save</button></div>
+    </div>
+  </div>
+
+  <div id="compressAskOverlay" class="modalOverlay hidden">
+    <div class="modalCard modalCardSmall">
+      <div class="modalHead"><span>Large image<span id="compressAskPlural">s</span></span></div>
+      <div class="modalBody">
+        <div id="compressAskText" class="settingsNote" style="margin:0 0 14px"></div>
+        <label class="checkRow"><input type="checkbox" id="compressAskRemember"><span>Remember this choice in Settings</span></label>
+      </div>
+      <div class="modalFoot" style="justify-content:space-between">
+        <button id="compressAskFull" class="btn ghost" type="button">Send full size</button>
+        <button id="compressAskCompress" class="btn primary" type="button">Compress &amp; send</button>
+      </div>
+    </div>
+  </div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 (() => {
@@ -280,6 +343,21 @@
   const POLL_FAST = 3000, POLL_MEDIUM = 10000, POLL_SLOW = 20000;
   let idlePolls = 0, lastRoomSignature = '';
   const blobCache = new Map();
+  const SETTINGS_KEY='hotdrop:settings';
+  const DEFAULT_SETTINGS={compressionMode:'ask',compressionThresholdMB:5,compressionQuality:70};
+  function loadSettings(){
+    try{
+      const raw=localStorage.getItem(SETTINGS_KEY);if(!raw)return {...DEFAULT_SETTINGS};
+      const parsed=JSON.parse(raw);
+      return {
+        compressionMode:['ask','always','never'].includes(parsed.compressionMode)?parsed.compressionMode:DEFAULT_SETTINGS.compressionMode,
+        compressionThresholdMB:Number(parsed.compressionThresholdMB)>0?Math.min(16,Number(parsed.compressionThresholdMB)):DEFAULT_SETTINGS.compressionThresholdMB,
+        compressionQuality:Math.min(95,Math.max(30,Number(parsed.compressionQuality)||DEFAULT_SETTINGS.compressionQuality))
+      };
+    }catch(_){return {...DEFAULT_SETTINGS}}
+  }
+  let settings=loadSettings();
+  function saveSettings(next){settings={...settings,...next};try{localStorage.setItem(SETTINGS_KEY,JSON.stringify(settings))}catch(_){}}
 
   function randCode(){const w=['sunny','quiet','swift','amber','coral','misty','bold','calm','sharp','lucky','silver','nova'];const a=['fox','otter','wren','lynx','hawk','ibis','crab','seal','mole','moth','panda','kite'];return `${w[Math.floor(Math.random()*w.length)]}-${a[Math.floor(Math.random()*a.length)]}-${Math.floor(Math.random()*90+10)}`}
   function normalizeRoom(v){return String(v||'').trim().toLowerCase().replace(/\s+/g,'-')}
@@ -365,14 +443,17 @@
   function flashCard(card,label){if(!card)return;let el=card.querySelector('.copyFlash');if(!el){el=document.createElement('div');el.className='copyFlash';el.innerHTML=CHECK_SVG+'<span></span>';card.appendChild(el)}el.querySelector('span').textContent=label;el.classList.add('show');clearTimeout(card._flashTimer);card._flashTimer=setTimeout(()=>el.classList.remove('show'),1000)}
   function button(label,handler,cls=''){const b=document.createElement('button');b.type='button';b.className=`btn small ${cls}`.trim();b.textContent=label;b.onclick=handler;return b}
   function fileUrlCached(item){return blobCache.get(item.id)||null}
-  async function getBlob(item,onProgress){if(blobCache.has(item.id))return fetch(blobCache.get(item.id)).then(r=>r.blob());const parts=[];const total=Math.max(1,Number(item.chunks||1));for(let i=0;i<total;i++){parts.push(await fetchChunk(item.id,i));if(onProgress)onProgress((i+1)/total)}return new Blob(parts,{type:item.mime||'application/octet-stream'})}
-  async function getBlobUrl(item,onProgress){if(blobCache.has(item.id))return blobCache.get(item.id);const blob=await getBlob(item,onProgress);const url=URL.createObjectURL(blob);blobCache.set(item.id,url);return url}
+  async function getBlob(item,onProgress){if(blobCache.has(item.id))return fetch(blobCache.get(item.id)).then(r=>r.blob());const parts=[];const total=Math.max(1,Number(item.chunks||1));for(let i=0;i<total;i++){parts.push(await fetchChunk(item.id,i));if(onProgress)onProgress((i+1)/total)}const blob=new Blob(parts,{type:item.mime||'application/octet-stream'});if(!blobCache.has(item.id))blobCache.set(item.id,URL.createObjectURL(blob));return blob}
+  async function getBlobUrl(item,onProgress){if(blobCache.has(item.id))return blobCache.get(item.id);const blob=await getBlob(item,onProgress);return blobCache.get(item.id)}
+  const PREFETCH_MAX_BYTES = 8*1024*1024;
+  const prefetching = new Set();
+  function prefetchImage(item){if(item.type!=='image'||!room)return;if(blobCache.has(item.id)||prefetching.has(item.id))return;if(item.size>PREFETCH_MAX_BYTES)return;prefetching.add(item.id);getBlob(item).catch(()=>{}).finally(()=>prefetching.delete(item.id))}
   async function downloadItem(item,progressEl,cardEl){try{setBusy(true);progressEl.textContent='Preparing 0%';const blob=await getBlob(item,p=>progressEl.textContent=`Preparing ${Math.round(p*100)}%`);const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=item.name||'download';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2500);progressEl.textContent='';toast('Download ready');flashCard(cardEl,'Downloaded')}catch(e){progressEl.textContent='';toast(e.message||'Download failed','bad')}finally{setBusy(false);updateOnlineState()}}
 
   function renderItems(items){const root=$('items');root.replaceChildren();$('feedCount').textContent=String(items.length);cleanupBlobCache(new Set(items.map(x=>x.id)));if(!items.length){const e=document.createElement('div');e.className='empty';e.innerHTML='<div class="emptyIcon">⇄</div><div class="emptyTitle">Nothing here yet</div><div class="emptySub">Paste text or drop a file above and it will appear on your other device.</div>';root.appendChild(e);return}
     [...items].sort((a,b)=>b.ts-a.ts).forEach(item=>{const cat=fileCategory(item);const card=document.createElement('article');card.className='item';card.tabIndex=0;const top=document.createElement('div');top.className='itemTop';const ico=document.createElement('div');ico.className='typeIcon cat-'+cat;ico.innerHTML=glyphFor(cat);const main=document.createElement('div');main.className='itemMain';const name=document.createElement('div');name.className='itemName';name.textContent=item.type==='text'?'Text snippet':(item.name||'File');const meta=document.createElement('div');meta.className='itemMeta';meta.textContent=`${new Date(item.ts).toLocaleString()}${item.type==='text'?'':` · ${fmtBytes(item.size)}`}`;main.append(name,meta);top.append(ico,main);card.appendChild(top);
       if(item.type==='text'){const body=document.createElement('div');body.className='textBody';body.textContent=item.data;card.appendChild(body)}
-      if(item.type==='image'){const wrap=document.createElement('div');wrap.className='imageWrap';
+      if(item.type==='image'){prefetchImage(item);const wrap=document.createElement('div');wrap.className='imageWrap';
         if(item.thumb){const img=document.createElement('img');img.src=`data:image/jpeg;base64,${item.thumb}`;img.alt=item.name||'Shared image';img.loading='lazy';wrap.appendChild(img)}
         else{const msg=document.createElement('div');msg.className='previewMsg';msg.textContent=item.size<=PREVIEW_AUTO_BYTES?'Loading preview…':'Large image — tap to load preview.';wrap.appendChild(msg);const loadEpoch=roomEpoch;const load=async()=>{if(wrap.querySelector('img'))return;if(!room||loadEpoch!==roomEpoch)return;try{const url=await getBlobUrl(item);if(loadEpoch!==roomEpoch)return;wrap.replaceChildren();const img=document.createElement('img');img.src=url;img.alt=item.name||'Shared image';wrap.appendChild(img)}catch(e){if(loadEpoch===roomEpoch)msg.textContent='Preview unavailable.'}};if(item.size<=PREVIEW_AUTO_BYTES)load();else wrap.onclick=e=>{e.stopPropagation();load()}}
         card.appendChild(wrap)}
@@ -393,6 +474,30 @@
 
   async function addText(){const val=$('textInput').value;if(!val.trim())return;setBusy(true);setNotice('Sending text…');try{const r=await apiJson({method:'POST',body:JSON.stringify({room,action:'addText',item:{id:uid(),type:'text',data:val,ts:Date.now()}})});$('textInput').value='';applyStats(r.stats);const n=(r.evicted||[]).length;setNotice(n?`Sent. Removed ${n} older item${n===1?'':'s'} to make space.`:'Sent and synced.','good');if(n)toast(`Made space by removing ${n} old item${n===1?'':'s'}`,'warn');wakePolling();await refresh(false,false)}catch(e){setNotice(e.message||'Could not send text.','bad')}finally{setBusy(false);updateOnlineState()}}
 
+  function compressImageFile(file,qualityPercent){
+    return new Promise((resolve,reject)=>{
+      const url=URL.createObjectURL(file);
+      const img=new Image();
+      img.onload=()=>{
+        try{
+          const MAX_EDGE=2400;
+          let w=img.naturalWidth,h=img.naturalHeight;
+          if(!w||!h){URL.revokeObjectURL(url);reject(new Error('Could not read image dimensions'));return}
+          if(Math.max(w,h)>MAX_EDGE){if(w>h){h=Math.round(h*MAX_EDGE/w);w=MAX_EDGE}else{w=Math.round(w*MAX_EDGE/h);h=MAX_EDGE}}
+          const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+          const ctx=canvas.getContext('2d');ctx.fillStyle='#ffffff';ctx.fillRect(0,0,w,h);ctx.drawImage(img,0,0,w,h);
+          canvas.toBlob(blob=>{
+            URL.revokeObjectURL(url);
+            if(!blob){reject(new Error('Compression failed'));return}
+            const base=(file.name||'image').replace(/\.[^./\\]+$/,'');
+            resolve(new File([blob],`${base}.jpg`,{type:'image/jpeg',lastModified:Date.now()}));
+          },'image/jpeg',Math.min(0.95,Math.max(0.3,qualityPercent/100)));
+        }catch(e){URL.revokeObjectURL(url);reject(e)}
+      };
+      img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('Could not read image for compression'))};
+      img.src=url;
+    });
+  }
   const MAX_THUMB_CHARS = 58 * 1024; // stay safely under the server's 60KB cap
   function makeThumbnail(file){
     return new Promise(resolve=>{
@@ -438,7 +543,32 @@
     }catch(e){if(initialized){try{await apiJson({method:'POST',body:JSON.stringify({room,action:'cancelBinary',id})})}catch(_){}}throw e}
   }
 
-  async function processFiles(fileList){const files=[...fileList].filter(Boolean);if(!files.length)return;if(uploadActive){toast('A transfer is already in progress — add these files again when it finishes.','warn');return}uploadActive=true;setBusy(true);setNotice(`Preparing ${files.length} file${files.length===1?'':'s'}…`);$('dropZone').classList.remove('drag');let done=0,evicted=0,failed=[];try{for(let i=0;i<files.length;i++){try{evicted+=await uploadOneFile(files[i],i,files.length);done++}catch(e){failed.push(e.message||files[i].name)}}wakePolling();await refresh(false,false);if(failed.length){setNotice(`${done} uploaded · ${failed.length} failed. ${failed[0]}`,'bad');toast(`${failed.length} file${failed.length===1?'':'s'} failed`,'bad')}else{setNotice(`${done} file${done===1?'':'s'} synced${evicted?` · ${evicted} older item${evicted===1?'':'s'} auto-removed to make space`:''}.`,'good');toast(done===1?'File synced':`${done} files synced`);if(evicted)toast(`Auto-cleanup removed ${evicted} old item${evicted===1?'':'s'}`,'warn')}}finally{uploadActive=false;setBusy(false);setUpload('',100);hideUpload();updateOnlineState()}}
+  function askCompressionChoice(count,thresholdMB,qualityPct){
+    return new Promise(resolve=>{
+      const overlay=$('compressAskOverlay');
+      $('compressAskPlural').textContent=count>1?'s':'';
+      $('compressAskText').textContent=`${count} image${count>1?'s are':' is'} over ${thresholdMB}MB. Compress to about ${qualityPct}% quality to save space and speed up the transfer, or send full size?`;
+      const remember=$('compressAskRemember');remember.checked=false;
+      overlay.classList.remove('hidden');
+      const full=$('compressAskFull'),comp=$('compressAskCompress');
+      function cleanup(choice){overlay.classList.add('hidden');full.removeEventListener('click',onFull);comp.removeEventListener('click',onComp);resolve({choice,remember:remember.checked})}
+      function onFull(){cleanup('full')}
+      function onComp(){cleanup('compress')}
+      full.addEventListener('click',onFull);comp.addEventListener('click',onComp);
+    });
+  }
+  async function processFiles(fileList){const files=[...fileList].filter(Boolean);if(!files.length)return;if(uploadActive){toast('A transfer is already in progress — add these files again when it finishes.','warn');return}uploadActive=true;setBusy(true);$('dropZone').classList.remove('drag');let done=0,evicted=0,failed=[];try{
+      const thresholdBytes=settings.compressionThresholdMB*1024*1024;
+      const qualifying=[];files.forEach((f,i)=>{if(f.type&&f.type.startsWith('image/')&&f.size>thresholdBytes)qualifying.push(i)});
+      if(qualifying.length){
+        let shouldCompress;
+        if(settings.compressionMode==='always')shouldCompress=true;
+        else if(settings.compressionMode==='never')shouldCompress=false;
+        else{setNotice(`Waiting — ${qualifying.length} large image${qualifying.length===1?'':'s'} to review…`);const {choice,remember}=await askCompressionChoice(qualifying.length,settings.compressionThresholdMB,settings.compressionQuality);shouldCompress=choice==='compress';if(remember)saveSettings({compressionMode:shouldCompress?'always':'never'})}
+        if(shouldCompress){setNotice(`Compressing ${qualifying.length} image${qualifying.length===1?'':'s'}…`);for(const idx of qualifying){try{files[idx]=await compressImageFile(files[idx],settings.compressionQuality)}catch(_){/* keep original on failure */}}}
+      }
+      setNotice(`Preparing ${files.length} file${files.length===1?'':'s'}…`);
+      for(let i=0;i<files.length;i++){try{evicted+=await uploadOneFile(files[i],i,files.length);done++}catch(e){failed.push(e.message||files[i].name)}}wakePolling();await refresh(false,false);if(failed.length){setNotice(`${done} uploaded · ${failed.length} failed. ${failed[0]}`,'bad');toast(`${failed.length} file${failed.length===1?'':'s'} failed`,'bad')}else{setNotice(`${done} file${done===1?'':'s'} synced${evicted?` · ${evicted} older item${evicted===1?'':'s'} auto-removed to make space`:''}.`,'good');toast(done===1?'File synced':`${done} files synced`);if(evicted)toast(`Auto-cleanup removed ${evicted} old item${evicted===1?'':'s'}`,'warn')}}finally{uploadActive=false;setBusy(false);setUpload('',100);hideUpload();updateOnlineState()}}
 
   async function pasteClipboard(){try{if(navigator.clipboard?.read){const entries=await navigator.clipboard.read();const files=[];for(const entry of entries){const imageType=entry.types.find(t=>t.startsWith('image/'));if(imageType){const blob=await entry.getType(imageType);const ext=imageType.split('/')[1]?.replace('jpeg','jpg')||'png';files.push(new File([blob],`clipboard-image-${Date.now()}.${ext}`,{type:imageType}))}}if(files.length){await processFiles(files);return}}const text=await navigator.clipboard.readText();if(text){const t=$('textInput');t.value=(t.value?`${t.value}\n`:'')+text;t.focus();toast('Pasted into text box');return}toast('Clipboard is empty','warn')}catch(e){toast('Browser blocked clipboard access — paste manually instead.','warn')}}
 
@@ -447,6 +577,32 @@
   $('shareBtn').onclick=async()=>{const link=`${location.origin}${location.pathname}#${encodeURIComponent(room)}`;try{await navigator.clipboard.writeText(link);toast('Room link copied')}catch(_){window.prompt('Copy this room link:',link)}};
   $('addTextBtn').onclick=addText;$('clearTextBtn').onclick=()=>{$('textInput').value='';$('textInput').focus()};$('pasteBtn').onclick=pasteClipboard;$('textInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();addText()}});
   $('refreshBtn').onclick=()=>{wakePolling();refresh(true,false)};
+  function populateSettingsForm(){
+    const mode=settings.compressionMode;
+    $('compAsk').checked=mode==='ask';$('compAlways').checked=mode==='always';$('compNever').checked=mode==='never';
+    $('compThreshold').value=settings.compressionThresholdMB;
+    $('compQuality').value=settings.compressionQuality;
+    $('compQualityLabel').textContent=settings.compressionQuality+'%';
+    updateSettingsFormDisabled();
+  }
+  function updateSettingsFormDisabled(){
+    const never=$('compNever').checked;
+    $('compThreshold').disabled=never;$('compQuality').disabled=never;
+  }
+  document.querySelectorAll('input[name="compMode"]').forEach(r=>r.addEventListener('change',updateSettingsFormDisabled));
+  function openSettings(){populateSettingsForm();$('settingsOverlay').classList.remove('hidden')}
+  function closeSettings(){$('settingsOverlay').classList.add('hidden')}
+  $('settingsBtn').onclick=openSettings;
+  $('settingsClose').onclick=closeSettings;
+  $('settingsOverlay').addEventListener('click',e=>{if(e.target.id==='settingsOverlay')closeSettings()});
+  $('compQuality').addEventListener('input',e=>{$('compQualityLabel').textContent=e.target.value+'%'});
+  $('settingsSave').onclick=()=>{
+    const mode=$('compAlways').checked?'always':($('compNever').checked?'never':'ask');
+    const thresholdMB=Math.min(16,Math.max(1,Number($('compThreshold').value)||DEFAULT_SETTINGS.compressionThresholdMB));
+    const quality=Math.min(95,Math.max(30,Number($('compQuality').value)||DEFAULT_SETTINGS.compressionQuality));
+    saveSettings({compressionMode:mode,compressionThresholdMB:thresholdMB,compressionQuality:quality});
+    toast('Settings saved');closeSettings();
+  };
   const dz=$('dropZone'),fi=$('fileInput');dz.onclick=()=>fi.click();dz.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fi.click()}});fi.onchange=e=>{const files=e.target.files;e.target.value='';processFiles(files)};
   ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();e.stopPropagation();dz.classList.add('drag')}));['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();e.stopPropagation();dz.classList.remove('drag')}));dz.addEventListener('drop',e=>processFiles(e.dataTransfer.files));
   document.addEventListener('paste',e=>{if(!room||uploadActive)return;const files=e.clipboardData?.files;if(files&&files.length){e.preventDefault();processFiles(files)}});
