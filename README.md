@@ -67,6 +67,27 @@ No React/Vite build is required. `api/share-target.js` hand-rolls its own tiny m
 
 **Share sheet note:** the Web Share Target API is Android/Chrome (and other installable-PWA browsers) only — iOS Safari does not support it, so on iPhone/iPad there's no share-sheet entry regardless of this feature.
 
+## Security notes
+
+A deliberate pass looking for real vulnerabilities, not just functional bugs. Findings:
+
+**Fixed:**
+- **Unbounded client-side memory growth** — background image prefetching had no cap on total cache size, fetching up to 8MB per image with no ceiling. This is the most likely explanation for occasional blank-then-reload behavior on memory-constrained devices (iPad in particular) — pressing Copy could be the final allocation that pushed Safari over its tab memory limit, triggering a silent reload. Now a proper LRU cache capped at 48MB total / 16 entries, evicting oldest-used blobs first.
+- **Raw browser error surfaced to users** — a clipboard permission-timing error (`NotAllowedError`, thrown when the full-quality fetch takes long enough that the browser's user-gesture window expires) was shown verbatim instead of a readable message. Now shows "Copy timed out — tap again to retry."
+- **Added a Content-Security-Policy header** — restricts script/style/font sources to only what's actually used (self, the QR library on cdnjs, Google Fonts), blocks framing entirely (`frame-ancestors 'none'`), and disallows `object-src`. Defense-in-depth on top of the points below, not a fix for something currently exploitable.
+
+**Checked and confirmed safe (with regression tests added where it made sense):**
+- No XSS injection path: every `innerHTML` assignment in the frontend is either clearing content or a fixed, hardcoded string with zero user data interpolated — all real user data (filenames, room codes, text) goes through `textContent`.
+- Files are always served for download as `application/octet-stream`, regardless of what MIME type was claimed at upload time — an attacker can't upload a file claiming to be `text/html` and get it rendered inline by a victim's browser.
+- No CORS headers are set, so the API is same-origin only by default — another website's JavaScript cannot read or write your rooms even if it somehow knew a room code.
+- No prototype pollution vector — request bodies are read field-by-field, never merged or spread onto trusted objects.
+- Filenames and MIME types are rejected outright if they contain CR/LF characters, closing off HTTP header-injection attempts.
+- All regexes (room codes, item IDs, multipart boundary parsing) are simple bounded patterns with no nested quantifiers — no ReDoS risk.
+- The share-target multipart body size is capped *during* streaming (the connection is dropped mid-upload if it's exceeded), not just checked after the fact — prevents a memory-exhaustion DoS from an oversized request.
+- Share-target tokens are 128 bits of `crypto.randomBytes` and enforced single-use server-side.
+
+**Known, accepted gap (not fixed, flagged for awareness):** there's no rate limiting on the API. A buggy or malicious client could hammer it with requests, which mainly costs *you* Redis command budget rather than exposing data (the room code is still required for meaningful access). Given the personal/small-group scope, this hasn't been built — say the word if you want basic per-IP throttling added.
+
 ## Testing
 
 Two suites, run both with `npm test`:

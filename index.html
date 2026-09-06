@@ -444,7 +444,21 @@
   let toastTimer = null, uploadActive = false;
   const POLL_FAST = 3000, POLL_MEDIUM = 10000, POLL_SLOW = 20000;
   let idlePolls = 0, lastRoomSignature = '';
+  // Bounded blob cache: a Map preserves insertion order, so re-inserting a key
+  // on access (delete+set) turns it into a simple LRU. Without a cap here,
+  // background prefetching of every image in a room -- unbounded -- was very
+  // likely why iPad in particular was hitting Safari's tight per-tab memory
+  // ceiling and silently reloading the page: exactly the "blank, syncs,
+  // reloads" symptom, and worse right when Copy triggered one more fetch on
+  // top of everything already cached.
+  const BLOB_CACHE_MAX_ENTRIES = 16;
+  const BLOB_CACHE_MAX_BYTES = 48*1024*1024; // soft ceiling; mobile Safari's real limit is far tighter than desktop
   const blobCache = new Map();
+  const blobCacheSizes = new Map();
+  let blobCacheTotalBytes = 0;
+  function blobCacheTouch(id){if(!blobCache.has(id))return;const url=blobCache.get(id);blobCache.delete(id);blobCache.set(id,url)}
+  function blobCacheEvictOne(){const oldestId=blobCache.keys().next().value;if(oldestId===undefined)return;const url=blobCache.get(oldestId);try{URL.revokeObjectURL(url)}catch(_){}blobCache.delete(oldestId);blobCacheTotalBytes-=blobCacheSizes.get(oldestId)||0;blobCacheSizes.delete(oldestId)}
+  function blobCacheSet(id,url,bytes){while(blobCache.size>=BLOB_CACHE_MAX_ENTRIES||(blobCacheTotalBytes+bytes)>BLOB_CACHE_MAX_BYTES){if(!blobCache.size)break;blobCacheEvictOne()}blobCache.set(id,url);blobCacheSizes.set(id,bytes);blobCacheTotalBytes+=bytes}
   const SETTINGS_KEY='hotdrop:settings';
   const DEFAULT_SETTINGS={compressionMode:'ask',compressionThresholdMB:5,compressionQuality:70};
   function loadSettings(){
@@ -551,7 +565,7 @@
   async function fetchChunk(id,index){if(!room)throw new Error('No active room.');const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),20000);try{const res=await fetch(`${API}?room=${encodeURIComponent(room)}&id=${encodeURIComponent(id)}&chunk=${index}`,{signal:controller.signal,cache:'no-store'});if(!res.ok){let m=`Download failed (${res.status})`;try{const j=await res.json();m=j.error||m}catch(_){}throw new Error(m)}return await res.arrayBuffer()}finally{clearTimeout(timer)}}
 
   function applyStats(stats){if(!stats)return;limits={...limits,...stats};const pct=Math.min(100,(Number(stats.usageBytes||0)/Math.max(1,Number(stats.maxRoomBytes||limits.maxRoomBytes)))*100);$('usageFill').style.width=pct+'%';$('usageFill').className='usageFill'+(pct>92?' bad':pct>78?' warn':'');$('usageText').textContent=`${fmtBytes(stats.usageBytes)} / ${fmtBytes(stats.maxRoomBytes)} · ${stats.itemCount||0} items`;$('dropSub').textContent=`Drop or choose files · up to ${fmtBytes(stats.maxFileBytes||limits.maxFileBytes)} each · multiple files supported.`}
-  function cleanupBlobCache(validIds){for(const [id,url] of blobCache){if(!validIds.has(id)){URL.revokeObjectURL(url);blobCache.delete(id)}}}
+  function cleanupBlobCache(validIds){for(const [id,url] of blobCache){if(!validIds.has(id)){URL.revokeObjectURL(url);blobCache.delete(id);blobCacheTotalBytes-=blobCacheSizes.get(id)||0;blobCacheSizes.delete(id)}}}
 
   async function refresh(showBusy=false,fromPoll=false){
     if(!room)return;
@@ -595,9 +609,9 @@
   const CHECK_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>';
   function flashCard(card,label){if(!card)return;let el=card.querySelector('.copyFlash');if(!el){el=document.createElement('div');el.className='copyFlash';el.innerHTML=CHECK_SVG+'<span></span>';card.appendChild(el)}el.querySelector('span').textContent=label;el.classList.add('show');clearTimeout(card._flashTimer);card._flashTimer=setTimeout(()=>el.classList.remove('show'),1000)}
   function button(label,handler,cls=''){const b=document.createElement('button');b.type='button';b.className=`btn small ${cls}`.trim();b.textContent=label;b.onclick=handler;return b}
-  function fileUrlCached(item){return blobCache.get(item.id)||null}
-  async function getBlob(item,onProgress){if(blobCache.has(item.id))return fetch(blobCache.get(item.id)).then(r=>r.blob());const parts=[];const total=Math.max(1,Number(item.chunks||1));for(let i=0;i<total;i++){parts.push(await fetchChunk(item.id,i));if(onProgress)onProgress((i+1)/total)}const blob=new Blob(parts,{type:item.mime||'application/octet-stream'});if(!blobCache.has(item.id))blobCache.set(item.id,URL.createObjectURL(blob));return blob}
-  async function getBlobUrl(item,onProgress){if(blobCache.has(item.id))return blobCache.get(item.id);const blob=await getBlob(item,onProgress);return blobCache.get(item.id)}
+  function fileUrlCached(item){if(blobCache.has(item.id))blobCacheTouch(item.id);return blobCache.get(item.id)||null}
+  async function getBlob(item,onProgress){if(blobCache.has(item.id)){blobCacheTouch(item.id);return fetch(blobCache.get(item.id)).then(r=>r.blob())}const parts=[];const total=Math.max(1,Number(item.chunks||1));for(let i=0;i<total;i++){parts.push(await fetchChunk(item.id,i));if(onProgress)onProgress((i+1)/total)}const blob=new Blob(parts,{type:item.mime||'application/octet-stream'});if(!blobCache.has(item.id))blobCacheSet(item.id,URL.createObjectURL(blob),blob.size);return blob}
+  async function getBlobUrl(item,onProgress){if(blobCache.has(item.id)){blobCacheTouch(item.id);return blobCache.get(item.id)}const blob=await getBlob(item,onProgress);return blobCache.get(item.id)}
   const PREFETCH_MAX_BYTES = 8*1024*1024;
   const prefetching = new Set();
   function prefetchImage(item){if(item.type!=='image'||!room)return;if(blobCache.has(item.id)||prefetching.has(item.id))return;if(item.size>PREFETCH_MAX_BYTES)return;prefetching.add(item.id);getBlob(item).catch(()=>{}).finally(()=>prefetching.delete(item.id))}
@@ -612,12 +626,12 @@
         card.appendChild(wrap)}
       const actions=document.createElement('div');actions.className='itemActions';const prog=document.createElement('span');prog.className='downloadProgress';
       async function copyTextItem(){try{await navigator.clipboard.writeText(item.data);toast('Text copied');flashCard(card,'Copied')}catch(_){toast('Clipboard access was blocked','bad')}}
-      async function copyImageItem(){try{const blob=await getBlob(item,p=>prog.textContent=`Loading ${Math.round(p*100)}%`);if(!window.ClipboardItem||!navigator.clipboard?.write)throw new Error('Image copy is not supported by this browser.');await navigator.clipboard.write([new ClipboardItem({[blob.type||'image/png']:blob})]);toast('Image copied');flashCard(card,'Copied')}catch(err){toast(err.message||'Copy failed','bad')}finally{prog.textContent=''}}
+      async function copyImageItem(){try{const blob=await getBlob(item,p=>prog.textContent=`Loading ${Math.round(p*100)}%`);if(!window.ClipboardItem||!navigator.clipboard?.write)throw new Error('Image copy is not supported by this browser.');await navigator.clipboard.write([new ClipboardItem({[blob.type||'image/png']:blob})]);toast('Image copied');flashCard(card,'Copied')}catch(err){const isPermissionTiming=err&&(err.name==='NotAllowedError'||/not allowed/i.test(err.message||''));toast(isPermissionTiming?'Copy timed out — tap again to retry':(err.message||'Copy failed'),'bad')}finally{prog.textContent=''}}
       if(item.type==='text'){actions.appendChild(button('Copy',async e=>{await copyTextItem();e.currentTarget.textContent='Copied';setTimeout(()=>e.currentTarget.textContent='Copy',1000)}))}
       if(item.type==='image'){actions.appendChild(button('Copy image',async e=>{const b=e.currentTarget;b.disabled=true;const before=b.textContent;await copyImageItem();b.textContent='Copied';setTimeout(()=>b.textContent=before,1000);b.disabled=false}));actions.appendChild(button('Download',()=>downloadItem(item,prog,card)))}
       if(item.type==='file')actions.appendChild(button('Download',()=>downloadItem(item,prog,card),'primary'));
       actions.appendChild(button(item.pinned?'Unpin':'Pin',async e=>{const b=e.currentTarget;b.disabled=true;try{await apiJson({method:'POST',body:JSON.stringify({room,action:'setPinned',id:item.id,pinned:!item.pinned})});wakePolling();await refresh(false,false);toast(item.pinned?'Unpinned':'Pinned')}catch(err){toast(err.message||'Could not update pin','bad')}finally{b.disabled=false}}));
-      actions.appendChild(button('Delete',async e=>{const b=e.currentTarget;b.disabled=true;try{setBusy(true);await apiJson({method:'DELETE',body:JSON.stringify({room,id:item.id})});if(blobCache.has(item.id)){URL.revokeObjectURL(blobCache.get(item.id));blobCache.delete(item.id)}wakePolling();await refresh(false,false);toast('Deleted')}catch(err){toast(err.message||'Delete failed','bad')}finally{setBusy(false);b.disabled=false;updateOnlineState()}},'danger'));actions.appendChild(prog);card.appendChild(actions);
+      actions.appendChild(button('Delete',async e=>{const b=e.currentTarget;b.disabled=true;try{setBusy(true);await apiJson({method:'DELETE',body:JSON.stringify({room,id:item.id})});if(blobCache.has(item.id)){URL.revokeObjectURL(blobCache.get(item.id));blobCache.delete(item.id);blobCacheTotalBytes-=blobCacheSizes.get(item.id)||0;blobCacheSizes.delete(item.id)}wakePolling();await refresh(false,false);toast('Deleted')}catch(err){toast(err.message||'Delete failed','bad')}finally{setBusy(false);b.disabled=false;updateOnlineState()}},'danger'));actions.appendChild(prog);card.appendChild(actions);
       if(item.pinned){const pin=document.createElement('div');pin.className='pinBadge';pin.title='Pinned — protected from auto-cleanup';pin.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.5 7 12v1h10v-1l-2-1.5V5a1 1 0 0 0-1-1H10a1 1 0 0 0-1 1z"/></svg>';card.appendChild(pin)}
       card.addEventListener('click',e=>{if(e.target.closest('.itemActions'))return;if(item.type==='text')copyTextItem();else if(item.type==='image')copyImageItem();else if(item.type==='file')downloadItem(item,prog,card)});
       card.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&!e.target.closest('.itemActions')){e.preventDefault();card.click()}});
@@ -695,7 +709,7 @@
   }
 
   function enterRoom(value,opts){const v=normalizeRoom(value);if(!roomValid(v)){$('codeInput').value=v;$('codeInput').focus();toast('Use 3–64 letters, numbers, dashes or underscores.','warn');return}clearPoll();idlePolls=0;lastRoomSignature='';roomEpoch++;lastAppliedSeq=0;const prevRoom=room;if(prevRoom&&prevRoom!==v)setLastViewed(prevRoom,Date.now());room=v;latestItems=[];$('items').innerHTML='';localStorage.setItem('hotdrop:lastRoom',v);saveRecentRoom(v);if(!openRooms.includes(v)){openRooms.push(v);saveOpenRooms()}renderRoomTabs();$('roomLabel').textContent=`Room: ${v}`;$('joinPanel').classList.add('hidden');$('board').classList.remove('hidden');history.replaceState(null,'','#'+encodeURIComponent(v));setSync('busy','Connecting…','Checking room');renderQr();pendingCatchUpCheck=true;refresh(true,false);if(pendingShare)processPendingShare()}
-  function leaveRoom(){clearPoll();idlePolls=0;lastRoomSignature='';roomEpoch++;lastAppliedSeq=0;if(room){setLastViewed(room,Date.now());openRooms=openRooms.filter(c=>c!==room);saveOpenRooms()}room=null;latestItems=[];for(const url of blobCache.values())URL.revokeObjectURL(url);blobCache.clear();$('board').classList.add('hidden');$('joinPanel').classList.remove('hidden');history.replaceState(null,'',location.pathname+location.search);const qc=$('qrCode');if(qc)qc.innerHTML='';renderRecentRooms();renderRoomTabs();$('codeInput').focus()}
+  function leaveRoom(){clearPoll();idlePolls=0;lastRoomSignature='';roomEpoch++;lastAppliedSeq=0;if(room){setLastViewed(room,Date.now());openRooms=openRooms.filter(c=>c!==room);saveOpenRooms()}room=null;latestItems=[];for(const url of blobCache.values())URL.revokeObjectURL(url);blobCache.clear();blobCacheSizes.clear();blobCacheTotalBytes=0;$('board').classList.add('hidden');$('joinPanel').classList.remove('hidden');history.replaceState(null,'',location.pathname+location.search);const qc=$('qrCode');if(qc)qc.innerHTML='';renderRecentRooms();renderRoomTabs();$('codeInput').focus()}
 
   async function addText(){const val=$('textInput').value;if(!val.trim())return;setBusy(true);setNotice('Sending text…');try{const r=await apiJson({method:'POST',body:JSON.stringify({room,action:'addText',item:{id:uid(),type:'text',data:val,ts:Date.now()}})});$('textInput').value='';applyStats(r.stats);const n=(r.evicted||[]).length;setNotice(n?`Sent. Removed ${n} older item${n===1?'':'s'} to make space.`:'Sent and synced.','good');if(n)toast(`Made space by removing ${n} old item${n===1?'':'s'}`,'warn');wakePolling();await refresh(false,false)}catch(e){setNotice(e.message||'Could not send text.','bad')}finally{setBusy(false);updateOnlineState()}}
 
@@ -863,7 +877,7 @@
       setBusy(true);
       const r=await apiJson({method:'POST',body:JSON.stringify({room,action:'resetRoom'})});
       for(const url of blobCache.values())URL.revokeObjectURL(url);
-      blobCache.clear();
+      blobCache.clear();blobCacheSizes.clear();blobCacheTotalBytes=0;
       $('resetRoomOverlay').classList.add('hidden');
       wakePolling();await refresh(false,false);
       toast(`Room reset — ${r.removed||0} item${(r.removed||0)===1?'':'s'} removed`);

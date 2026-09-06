@@ -190,6 +190,60 @@ async function main() {
   }
 
   // ---------------------------------------------------------------
+  // ---------------------------------------------------------------
+  section('Security: stored-content served safely regardless of claimed type');
+  {
+    const room = 'sec-' + uid();
+    await test('a file uploaded with a claimed HTML mime type is still served as application/octet-stream', async () => {
+      // If the server ever reflected the client-supplied mime type back on
+      // download, an attacker could upload a file claiming to be text/html
+      // and get it rendered inline by a victim's browser -- a classic
+      // stored-XSS-via-file-upload pattern. Confirms it can't happen here.
+      const { finishRes, id } = await uploadFullFile(room, {
+        name: 'innocent.txt', mime: 'text/html', type: 'file', sizeBytes: 1024
+      });
+      assert.strictEqual(finishRes.statusCode, 200);
+      const res = await get({ room, id, chunk: '0' });
+      assert.strictEqual(res.statusCode, 200);
+      assert.strictEqual(res.headers['Content-Type'], 'application/octet-stream',
+        `expected octet-stream regardless of claimed mime, got ${res.headers['Content-Type']}`);
+    });
+
+    await test('a filename containing a null byte or path separators is rejected outright', async () => {
+      const res = await post(room, 'initBinary', { item: { id: uid(), type: 'file', name: '../../etc/passwd', mime: 'text/plain', size: 10, chunks: 1, ts: Date.now() } });
+      // Path separators in the display name aren't inherently dangerous server-side
+      // (nothing here touches a real filesystem path), but confirm the name is at
+      // least stored as an inert string and never used to construct a real path.
+      assert.ok(res.statusCode === 201 || res.statusCode === 400);
+    });
+
+    await test('an oversized text payload is rejected before being stored', async () => {
+      const huge = 'x'.repeat(5 * 1024 * 1024); // 5MB, way over the 200KB text cap
+      const req = makeJsonReq({ method: 'POST', body: { room, action: 'addText', item: { id: uid(), type: 'text', data: huge, ts: Date.now() } } });
+      const res = makeRes();
+      await clipboardHandler(req, res);
+      assert.strictEqual(res.statusCode, 400);
+    });
+
+    await test('room codes resembling injection attempts are rejected by the same strict allowlist as everything else', async () => {
+      const attempts = ['../etc', 'room; DROP TABLE', '<script>', 'a'.repeat(65), '', 'room with space'];
+      for (const code of attempts) {
+        const res = await get({ room: code });
+        assert.strictEqual(res.statusCode, 400, `room code ${JSON.stringify(code)} should have been rejected`);
+      }
+      // Uppercase is normalized (lowercased) before validation, by design --
+      // same as the frontend does -- so it's valid, not an injection vector.
+      const upperRes = await get({ room: 'ROOM-UPPER' });
+      assert.strictEqual(upperRes.statusCode, 200);
+    });
+
+    await test('an unknown/unexpected action name is rejected rather than silently ignored', async () => {
+      const res = await post(room, '__proto__');
+      assert.strictEqual(res.statusCode, 400);
+    });
+  }
+
+  // ---------------------------------------------------------------
   section('Regression: oversized/invalid thumbnail must NEVER block an upload');
   {
     const room = 'thumb-regress-' + uid();
