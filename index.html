@@ -47,6 +47,22 @@
     .roomCode{font-weight:650;color:var(--text)}
     .roomActions{display:flex;gap:4px}
 
+    .roomTabs{flex:none;display:flex;align-items:center;gap:3px;padding:8px 12px 0;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:thin}
+    .roomTabs::-webkit-scrollbar{height:4px}
+    .roomTabs::-webkit-scrollbar-thumb{background:var(--line);border-radius:2px}
+    .roomTab{display:flex;align-items:center;gap:7px;padding:8px 10px;border-radius:9px 9px 0 0;font-size:12.5px;cursor:pointer;white-space:nowrap;flex:none;position:relative;top:1px;transition:background .12s ease,color .12s ease}
+    .roomTab.active{background:var(--panel);color:var(--text);font-weight:650}
+    .roomTab.asleep{color:var(--muted)}
+    .roomTab.asleep:hover{background:rgba(255,255,255,.04);color:var(--text)}
+    .roomTab .tabName{max-width:140px;overflow:hidden;text-overflow:ellipsis}
+    .tabDot{width:6px;height:6px;border-radius:999px;background:var(--good);flex:none;animation:tabPulse 1.6s ease-in-out infinite}
+    @keyframes tabPulse{0%,100%{opacity:1}50%{opacity:.35}}
+    .tabMoon{width:11px;height:11px;flex:none;opacity:.65;display:flex}
+    .tabMoon svg{width:11px;height:11px}
+    .tabClose{border:none;background:none;color:inherit;opacity:.45;font-size:14px;cursor:pointer;padding:0 2px;line-height:1;border-radius:4px}
+    .tabClose:hover{opacity:1;background:rgba(255,255,255,.1)}
+    .tabAdd{border:none;background:none;color:var(--muted);font-size:16px;cursor:pointer;padding:6px 10px;border-radius:8px;flex:none;line-height:1}
+    .tabAdd:hover{background:rgba(255,255,255,.06);color:var(--text)}
     .statusDetails{flex:none;border-bottom:1px solid var(--line)}
     .statusDetails summary{list-style:none;cursor:pointer;font-size:11px;color:var(--muted);padding:7px 18px;display:flex;align-items:center;gap:7px}
     .statusDetails summary::-webkit-details-marker{display:none}
@@ -259,6 +275,8 @@
         </div>
       </div>
 
+      <div id="roomTabs" class="roomTabs hidden"></div>
+
       <details class="statusDetails">
         <summary><span id="statusText">Connecting…</span></summary>
         <div class="statusPanel">
@@ -405,7 +423,24 @@
   const DEFAULT_LIMITS = { maxFileBytes: 16*1024*1024, maxRoomBytes: 32*1024*1024, chunkBytes: 1536*1024, maxItems:120 };
   const PREVIEW_AUTO_BYTES = 2.5 * 1024 * 1024;
   const THUMB_MAX_DIM = 480, THUMB_QUALITY = 0.62;
+  const OPEN_ROOMS_KEY='hotdrop:openRooms';
+  const LAST_VIEWED_KEY='hotdrop:lastViewed';
+  // Rooms the user has open as tabs. Only the ACTIVE one ever polls -- background
+  // tabs make zero requests until switched to (full sleep, by design).
+  let openRooms=[];
+  let pendingCatchUpCheck=false;
+  function loadOpenRooms(){try{const raw=localStorage.getItem(OPEN_ROOMS_KEY);const arr=raw?JSON.parse(raw):[];return Array.isArray(arr)?arr.filter(x=>typeof x==='string'&&roomValid(x)):[]}catch(_){return []}}
+  function saveOpenRooms(){try{localStorage.setItem(OPEN_ROOMS_KEY,JSON.stringify(openRooms.slice(0,12)))}catch(_){}}
+  function loadLastViewedMap(){try{const raw=localStorage.getItem(LAST_VIEWED_KEY);const o=raw?JSON.parse(raw):{};return (o&&typeof o==='object')?o:{}}catch(_){return {}}}
+  function setLastViewed(code,ts){try{const m=loadLastViewedMap();m[code]=ts;localStorage.setItem(LAST_VIEWED_KEY,JSON.stringify(m))}catch(_){}}
+  function getLastViewed(code){const m=loadLastViewedMap();return Number(m[code]||0)}
+
   let room = null, roomEpoch = 0, poller = null, busy = 0, lastSync = null, limits = {...DEFAULT_LIMITS}, latestItems = [];
+  // Monotonic counter for refresh requests. The room/epoch guard stops one
+  // room's response landing on another, but two overlapping refreshes of the
+  // SAME room share a room and epoch -- so we also track which response is
+  // the newest and ignore any that resolves out of order behind it.
+  let refreshSeq = 0, lastAppliedSeq = 0;
   let toastTimer = null, uploadActive = false;
   const POLL_FAST = 3000, POLL_MEDIUM = 10000, POLL_SLOW = 20000;
   let idlePolls = 0, lastRoomSignature = '';
@@ -520,15 +555,41 @@
 
   async function refresh(showBusy=false,fromPoll=false){
     if(!room)return;
+    const requestedRoom=room,requestedEpoch=roomEpoch,mySeq=++refreshSeq;
     if(showBusy)setBusy(true);
     try{
-      const data=await apiJson({url:`${API}?room=${encodeURIComponent(room)}`});
+      const data=await apiJson({url:`${API}?room=${encodeURIComponent(requestedRoom)}`});
+      // Discard this response if the room changed while the request was in
+      // flight -- without this check, a slow/late response for a room you've
+      // since switched away from could silently overwrite the newer view.
+      if(requestedRoom!==room||requestedEpoch!==roomEpoch)return;
+      // Drop a response that resolved out of order behind a newer one for this
+      // same room -- otherwise older data would overwrite newer data.
+      if(mySeq<lastAppliedSeq)return;
+      lastAppliedSeq=mySeq;
       latestItems=Array.isArray(data.items)?data.items:[];
       const sig=roomSignature(latestItems,data.stats);
       if(lastRoomSignature&&sig===lastRoomSignature){if(fromPoll)idlePolls=Math.min(99,idlePolls+1)}else{idlePolls=0;lastRoomSignature=sig}
       applyStats(data.stats);renderItems(latestItems);renderSnapshot(latestItems,data.stats);lastSync=new Date();
-    }catch(e){setSync('bad',navigator.onLine?'Sync problem':'Offline',e.name==='AbortError'?'Request timed out':e.message);if(showBusy)toast(e.message||'Could not sync','bad')}
-    finally{if(showBusy)setBusy(false);if(!uploadActive&&room&&navigator.onLine&&!document.hidden)schedulePoll();else updateOnlineState()}
+      // Catch-up hint on first load of a room after switching in -- costs no
+      // extra requests, it just compares against a locally stored timestamp.
+      if(pendingCatchUpCheck){
+        pendingCatchUpCheck=false;
+        const since=getLastViewed(requestedRoom);
+        if(since){
+          const n=latestItems.filter(i=>Number(i.ts||0)>since).length;
+          if(n>0)toast(`${n} new item${n===1?'':'s'} since you last looked`);
+        }
+      }
+    }catch(e){
+      if(requestedRoom!==room||requestedEpoch!==roomEpoch)return;
+      setSync('bad',navigator.onLine?'Sync problem':'Offline',e.name==='AbortError'?'Request timed out':e.message);if(showBusy)toast(e.message||'Could not sync','bad')}
+    finally{
+      if(showBusy)setBusy(false); // must always balance the setBusy(true) above, regardless of room changes
+      if(requestedRoom===room&&requestedEpoch===roomEpoch){
+        if(!uploadActive&&room&&navigator.onLine&&!document.hidden)schedulePoll();else updateOnlineState()
+      }
+    }
   }
 
   const CHECK_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>';
@@ -563,8 +624,78 @@
       root.appendChild(card)})
   }
 
-  function enterRoom(value){const v=normalizeRoom(value);if(!roomValid(v)){$('codeInput').value=v;$('codeInput').focus();toast('Use 3–64 letters, numbers, dashes or underscores.','warn');return}clearPoll();idlePolls=0;lastRoomSignature='';roomEpoch++;room=v;localStorage.setItem('hotdrop:lastRoom',v);saveRecentRoom(v);$('roomLabel').textContent=`Room: ${v}`;$('joinPanel').classList.add('hidden');$('board').classList.remove('hidden');history.replaceState(null,'','#'+encodeURIComponent(v));setSync('busy','Connecting…','Checking room');renderQr();refresh(true,false);if(pendingShare)processPendingShare()}
-  function leaveRoom(){clearPoll();idlePolls=0;lastRoomSignature='';roomEpoch++;room=null;latestItems=[];for(const url of blobCache.values())URL.revokeObjectURL(url);blobCache.clear();$('board').classList.add('hidden');$('joinPanel').classList.remove('hidden');history.replaceState(null,'',location.pathname+location.search);const qc=$('qrCode');if(qc)qc.innerHTML='';renderRecentRooms();$('codeInput').focus()}
+  function renderRoomTabs(){
+    const strip=$('roomTabs');if(!strip)return;
+    strip.innerHTML='';
+    if(!openRooms.length){strip.classList.add('hidden');return}
+    strip.classList.remove('hidden');
+    openRooms.forEach(code=>{
+      const tab=document.createElement('div');
+      const isActive=code===room;
+      tab.className='roomTab'+(isActive?' active':' asleep');
+      tab.title=isActive?`${code} — syncing live`:`${code} — asleep (no requests until opened)`;
+
+      const mark=document.createElement('span');
+      if(isActive){mark.className='tabDot'}
+      else{mark.className='tabMoon';mark.innerHTML='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>'}
+      tab.appendChild(mark);
+
+      const name=document.createElement('span');
+      name.className='tabName';name.textContent=code;
+      tab.appendChild(name);
+
+      const close=document.createElement('button');
+      close.type='button';close.className='tabClose';close.textContent='×';
+      close.title='Close this tab';
+      close.onclick=e=>{e.stopPropagation();closeRoomTab(code)};
+      tab.appendChild(close);
+
+      tab.onclick=()=>{if(code!==room)switchToRoom(code)};
+      strip.appendChild(tab);
+    });
+    const add=document.createElement('button');
+    add.type='button';add.className='tabAdd';add.textContent='+';
+    add.title='Join another room';
+    add.onclick=()=>openJoinAnother();
+    strip.appendChild(add);
+  }
+
+  function openJoinAnother(){
+    // Park the current room (it keeps its tab) and show the join screen so a
+    // new code can be entered. Nothing is closed or lost.
+    clearPoll();
+    if(room)setLastViewed(room,Date.now());
+    roomEpoch++;lastAppliedSeq=0;room=null;latestItems=[];lastRoomSignature='';idlePolls=0;
+    $('board').classList.add('hidden');$('joinPanel').classList.remove('hidden');
+    history.replaceState(null,'',location.pathname+location.search);
+    renderRecentRooms();renderRoomTabs();
+    $('codeInput').value='';$('codeInput').focus();
+  }
+
+  function closeRoomTab(code){
+    const wasActive=code===room;
+    openRooms=openRooms.filter(c=>c!==code);
+    saveOpenRooms();
+    if(wasActive){
+      if(openRooms.length){switchToRoom(openRooms[0])}
+      else{leaveRoom()}
+    }else{
+      renderRoomTabs();
+    }
+  }
+
+  function switchToRoom(code){
+    if(!roomValid(code))return;
+    // Full sleep model: stop the outgoing room's polling entirely, bump the
+    // epoch so any of its in-flight responses are discarded rather than
+    // painting over the room we're switching to.
+    clearPoll();
+    if(room)setLastViewed(room,Date.now());
+    enterRoom(code,{keepTabs:true});
+  }
+
+  function enterRoom(value,opts){const v=normalizeRoom(value);if(!roomValid(v)){$('codeInput').value=v;$('codeInput').focus();toast('Use 3–64 letters, numbers, dashes or underscores.','warn');return}clearPoll();idlePolls=0;lastRoomSignature='';roomEpoch++;lastAppliedSeq=0;const prevRoom=room;if(prevRoom&&prevRoom!==v)setLastViewed(prevRoom,Date.now());room=v;latestItems=[];$('items').innerHTML='';localStorage.setItem('hotdrop:lastRoom',v);saveRecentRoom(v);if(!openRooms.includes(v)){openRooms.push(v);saveOpenRooms()}renderRoomTabs();$('roomLabel').textContent=`Room: ${v}`;$('joinPanel').classList.add('hidden');$('board').classList.remove('hidden');history.replaceState(null,'','#'+encodeURIComponent(v));setSync('busy','Connecting…','Checking room');renderQr();pendingCatchUpCheck=true;refresh(true,false);if(pendingShare)processPendingShare()}
+  function leaveRoom(){clearPoll();idlePolls=0;lastRoomSignature='';roomEpoch++;lastAppliedSeq=0;if(room){setLastViewed(room,Date.now());openRooms=openRooms.filter(c=>c!==room);saveOpenRooms()}room=null;latestItems=[];for(const url of blobCache.values())URL.revokeObjectURL(url);blobCache.clear();$('board').classList.add('hidden');$('joinPanel').classList.remove('hidden');history.replaceState(null,'',location.pathname+location.search);const qc=$('qrCode');if(qc)qc.innerHTML='';renderRecentRooms();renderRoomTabs();$('codeInput').focus()}
 
   async function addText(){const val=$('textInput').value;if(!val.trim())return;setBusy(true);setNotice('Sending text…');try{const r=await apiJson({method:'POST',body:JSON.stringify({room,action:'addText',item:{id:uid(),type:'text',data:val,ts:Date.now()}})});$('textInput').value='';applyStats(r.stats);const n=(r.evicted||[]).length;setNotice(n?`Sent. Removed ${n} older item${n===1?'':'s'} to make space.`:'Sent and synced.','good');if(n)toast(`Made space by removing ${n} old item${n===1?'':'s'}`,'warn');wakePolling();await refresh(false,false)}catch(e){setNotice(e.message||'Could not send text.','bad')}finally{setBusy(false);updateOnlineState()}}
 
@@ -759,7 +890,11 @@
     if(room&&!uploadActive){wakePolling();refresh(false,false)}
   });
 
-  const hash=decodeURIComponent(location.hash.replace(/^#/, '')).trim();if(hash)enterRoom(hash);else{const last=localStorage.getItem('hotdrop:lastRoom');if(last)$('codeInput').value=last;renderRecentRooms()}
+  openRooms=loadOpenRooms();
+  const hash=decodeURIComponent(location.hash.replace(/^#/, '')).trim();
+  if(hash){enterRoom(hash)}
+  else if(openRooms.length){enterRoom(openRooms[0])}
+  else{const last=localStorage.getItem('hotdrop:lastRoom');if(last)$('codeInput').value=last;renderRecentRooms()}
 })();
 </script>
 </body></html>

@@ -13,7 +13,8 @@ A lightweight cross-device drop for moving **text, images, and files** between y
 - **Settings screen** (gear icon, top-right) for image compression: ask every time, always compress over a size threshold to a set quality, or never compress
 - **Pin items** to protect them from the automatic storage cleanup — pinned items are only evicted as an absolute last resort if a room is completely full of pinned content
 - **Reset a room** — a Settings-screen "Danger zone" button that permanently deletes every item in the current room (for every device using it), behind a confirmation step
-- **Monthly usage meter** — an 8-bit pixel-style gauge in Settings estimating how much of the hosting tier's shared monthly request budget has been used, across all rooms
+- **Room tabs** — keep several rooms open at once and switch between them like browser tabs. Only the active tab polls; background tabs go fully to sleep (zero requests) until you switch back, then refresh instantly and show a "N new since you last looked" hint.
+- **Monthly usage meter** — an 8-bit pixel-style gauge in the session snapshot estimating how much of the hosting tier's shared monthly request budget has been used, across all rooms
 - **Room expiry countdown** and a **recent rooms** list on the join screen for one-tap switching between rooms you use often
 - **Share sheet integration** (Android/Chrome installs only) — share a photo or link into HotDrop directly from any other app via the OS share sheet
 - Multiple file selection, clipboard-image paste support
@@ -68,13 +69,20 @@ No React/Vite build is required. `api/share-target.js` hand-rolls its own tiny m
 
 ## Testing
 
-`test/` contains a zero-dependency integration + benchmark suite that mocks Redis in-memory and drives the real `api/clipboard.js` and `api/share-target.js` handlers directly (not reimplementations of their logic). Run it with:
+Two suites, run both with `npm test`:
 
-```
-node test/run.js
-```
+**Backend** (`node test/run.js`) — zero-dependency integration + benchmark suite that mocks Redis in-memory and drives the real `api/clipboard.js` and `api/share-target.js` handlers directly (not reimplementations of their logic). Covers: text/binary CRUD, input validation and abuse-hardening (bad room codes, header-injection attempts, oversized payloads), the pin-protected eviction logic (including the "evict a pinned item only as an absolute last resort" path), room TTL surfacing, room reset, monthly usage tracking, the full share-target multipart round trip (including a binary payload with embedded CRLF bytes, to make sure the parser doesn't mistake file bytes for a boundary), and a few throughput benchmarks.
 
-or `npm test` if you'd rather. It covers: text/binary CRUD, input validation and abuse-hardening (bad room codes, header-injection attempts, oversized payloads), the pin-protected eviction logic (including the "evict a pinned item only as an absolute last resort" path), room TTL surfacing, the full share-target multipart round trip (including a binary payload with embedded CRLF bytes, to make sure the parser doesn't mistake file bytes for a boundary), and a few throughput benchmarks. It does not touch your real Redis or Vercel deployment — everything runs in-process against an in-memory store.
+**Frontend sync** (`node test/sync.js`) — loads the real `index.html` in jsdom with a fully controllable fake network, so every request can be held open and resolved in a deliberately chosen order. This exists to prove the app can't show wrong data under bad timing. It covers the scenarios that actually cause "my file disappeared" bugs:
+
+- A slow response for room A arriving *after* you've switched to room B (must be discarded, not painted over B)
+- Two overlapping refreshes of the *same* room resolving out of order (the older one must not revert newer data) — this one caught a real bug during development, which is why the request-sequence guard exists
+- Background tabs making **zero** requests while asleep
+- Switching to a sleeping tab refreshing immediately, with its own data and no leakage from the previous room
+- Failed requests leaving the last good data intact, and not permanently sticking the busy/sync indicator
+- Rapid switching between three rooms with all responses resolved in scrambled order, ending on a tab whose feed matches that tab
+
+Neither suite touches your real Redis or Vercel deployment — everything runs in-process. `jsdom` is the only dependency and is dev-only; the shipped app still has zero runtime dependencies.
 
 ## Icons
 
