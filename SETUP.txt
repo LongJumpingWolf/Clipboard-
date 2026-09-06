@@ -28,9 +28,15 @@ WHAT THIS VERSION ADDS
 - Tap/click anywhere on an item to act on it: copies text, copies images,
   downloads files — buttons still work independently
 - Image thumbnails embedded directly in item metadata for instant preview;
-  full-quality bytes are only fetched on Copy image / Download
+  full-quality bytes are cached after first fetch and quietly prefetched
+  in the background, so Copy/Download is usually instant
 - File-type icon badges (PDF, Word, Excel, PowerPoint, archive, audio,
   video, code, image, generic), each with its own accent color
+- Settings screen (gear icon) for image compression: ask each time,
+  always compress over a size threshold, or never compress
+- Pin items to protect them from auto-cleanup
+- Room expiry countdown and a recent-rooms quick-switch list
+- Share sheet integration via /api/share-target (Android/Chrome PWA only)
 - Multiple-file uploads, chunked file transfer
 - Download files on another device
 - Clipboard-image paste

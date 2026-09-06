@@ -11,6 +11,9 @@ A lightweight cross-device drop for moving **text, images, and files** between y
 - File-type icons (PDF, Word, Excel, PowerPoint, archive, audio, video, code, image, generic) with distinct colors
 - Instant copy: full-quality image blobs are cached after first fetch and quietly prefetched in the background as items appear, so Copy/Download is usually instant instead of waiting on a network round-trip
 - **Settings screen** (gear icon, top-right) for image compression: ask every time, always compress over a size threshold to a set quality, or never compress
+- **Pin items** to protect them from the automatic storage cleanup — pinned items are only evicted as an absolute last resort if a room is completely full of pinned content
+- **Room expiry countdown** and a **recent rooms** list on the join screen for one-tap switching between rooms you use often
+- **Share sheet integration** (Android/Chrome installs only) — share a photo or link into HotDrop directly from any other app via the OS share sheet
 - Multiple file selection, clipboard-image paste support
 - Chunked binary uploads/downloads
 - File downloads on the receiving device
@@ -57,7 +60,19 @@ README.md
 SETUP.txt
 ```
 
-No React/Vite build is required.
+No React/Vite build is required. `api/share-target.js` hand-rolls its own tiny multipart parser rather than adding a dependency, so the project still has zero npm packages.
+
+**Share sheet note:** the Web Share Target API is Android/Chrome (and other installable-PWA browsers) only — iOS Safari does not support it, so on iPhone/iPad there's no share-sheet entry regardless of this feature.
+
+## Testing
+
+`test/` contains a zero-dependency integration + benchmark suite that mocks Redis in-memory and drives the real `api/clipboard.js` and `api/share-target.js` handlers directly (not reimplementations of their logic). Run it with:
+
+```
+node test/run.js
+```
+
+or `npm test` if you'd rather. It covers: text/binary CRUD, input validation and abuse-hardening (bad room codes, header-injection attempts, oversized payloads), the pin-protected eviction logic (including the "evict a pinned item only as an absolute last resort" path), room TTL surfacing, the full share-target multipart round trip (including a binary payload with embedded CRLF bytes, to make sure the parser doesn't mistake file bytes for a boundary), and a few throughput benchmarks. It does not touch your real Redis or Vercel deployment — everything runs in-process against an in-memory store.
 
 ## Icons
 

@@ -80,6 +80,8 @@
     .copyFlash{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:7px;background:rgba(14,16,22,.94);color:#fff;font-size:13px;font-weight:650;opacity:0;pointer-events:none;transition:opacity .15s ease;z-index:2;border-radius:13px}
     .copyFlash.show{opacity:1}
     .copyFlash svg{width:16px;height:16px;flex:none}
+    .pinBadge{position:absolute;top:8px;right:8px;width:20px;height:20px;border-radius:6px;background:rgba(255,138,76,.16);border:1px solid rgba(255,138,76,.4);color:var(--accent);display:flex;align-items:center;justify-content:center;pointer-events:none}
+    .pinBadge svg{width:11px;height:11px}
     .itemTop{display:flex;align-items:flex-start;gap:10px}
     .typeIcon{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex:none;border:1px solid rgba(255,255,255,.06)}
     .typeIcon.cat-text{background:#2a2119;color:#ff8a4c}
@@ -154,6 +156,14 @@
     .join{width:min(440px,100%);margin:0 auto;padding:28px 26px;border:1px solid var(--line);border-radius:16px;background:var(--panel)}
     .join h1{font-size:19px;line-height:1.35;margin:0 0 8px;font-weight:700;letter-spacing:-.01em}
     .join p{margin:0 0 20px;color:var(--muted);line-height:1.6;font-size:13.5px}
+    .recentRoomsWrap{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+    .recentHead{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+    .recentLabel{font-size:11px;font-weight:650;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+    .linklike{background:none;border:none;padding:0;color:var(--muted);font-size:11px;cursor:pointer;text-decoration:underline}
+    .linklike:hover{color:var(--text)}
+    .recentRooms{display:flex;flex-wrap:wrap;gap:8px}
+    .roomChipBtn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:999px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
+    .roomChipBtn:hover{background:#1c2028;border-color:#333a48}
     .codeRow{display:flex;gap:9px}
     #codeInput{flex:1;min-width:0}
 
@@ -224,6 +234,10 @@
           <button id="joinBtn" class="btn primary">Join</button>
           <button id="newBtn" class="btn">New</button>
         </div>
+        <div id="recentRoomsWrap" class="recentRoomsWrap hidden">
+          <div class="recentHead"><span class="recentLabel">Recent rooms</span><button id="clearRecentRooms" type="button" class="linklike">Clear</button></div>
+          <div id="recentRooms" class="recentRooms"></div>
+        </div>
       </div>
     </div>
 
@@ -283,6 +297,7 @@
           <div class="snapDivider"></div>
           <div class="snapRow"><span>Storage used</span><span id="snapStorage">—</span></div>
           <div class="snapRow"><span>Last activity</span><span id="snapLastActive">—</span></div>
+          <div class="snapRow"><span>Room expires</span><span id="snapExpires">—</span></div>
         </div>
       </aside>
     </div>
@@ -334,6 +349,19 @@
 <script>
 (() => {
   const $ = id => document.getElementById(id);
+  let pendingShare = null;
+  (function checkForIncomingShare(){
+    const params=new URLSearchParams(location.search);
+    const token=params.get('share');
+    if(!token)return;
+    history.replaceState(null,'',location.pathname+location.hash);
+    fetch(`/api/share-target?token=${encodeURIComponent(token)}`).then(r=>r.ok?r.json():null).then(data=>{
+      if(!data)return;
+      if(!data.title&&!data.text&&!data.url&&!(data.files&&data.files.length))return;
+      pendingShare=data;
+      toast('Shared content ready — join a room to send it');
+    }).catch(()=>{});
+  })();
   const API = '/api/clipboard';
   const DEFAULT_LIMITS = { maxFileBytes: 16*1024*1024, maxRoomBytes: 32*1024*1024, chunkBytes: 1536*1024, maxItems:120 };
   const PREVIEW_AUTO_BYTES = 2.5 * 1024 * 1024;
@@ -357,6 +385,10 @@
     }catch(_){return {...DEFAULT_SETTINGS}}
   }
   let settings=loadSettings();
+  const RECENT_ROOMS_KEY='hotdrop:recentRooms';
+  function loadRecentRooms(){try{const raw=localStorage.getItem(RECENT_ROOMS_KEY);const arr=raw?JSON.parse(raw):[];return Array.isArray(arr)?arr.filter(x=>x&&typeof x.code==='string'):[]}catch(_){return []}}
+  function saveRecentRoom(code){try{let arr=loadRecentRooms().filter(x=>x.code!==code);arr.unshift({code,ts:Date.now()});localStorage.setItem(RECENT_ROOMS_KEY,JSON.stringify(arr.slice(0,6)))}catch(_){}}
+  function renderRecentRooms(){const wrap=$('recentRoomsWrap'),list=$('recentRooms');if(!wrap||!list)return;const arr=loadRecentRooms();list.innerHTML='';if(!arr.length){wrap.classList.add('hidden');return}wrap.classList.remove('hidden');arr.forEach(r=>{const chip=document.createElement('button');chip.type='button';chip.className='roomChipBtn';chip.textContent=r.code;chip.onclick=()=>enterRoom(r.code);list.appendChild(chip)})}
   function saveSettings(next){settings={...settings,...next};try{localStorage.setItem(SETTINGS_KEY,JSON.stringify(settings))}catch(_){}}
 
   function randCode(){const w=['sunny','quiet','swift','amber','coral','misty','bold','calm','sharp','lucky','silver','nova'];const a=['fox','otter','wren','lynx','hawk','ibis','crab','seal','mole','moth','panda','kite'];return `${w[Math.floor(Math.random()*w.length)]}-${a[Math.floor(Math.random()*a.length)]}-${Math.floor(Math.random()*90+10)}`}
@@ -368,7 +400,8 @@
   function fmtSince(ts){if(!ts)return 'No activity yet';const sec=Math.max(0,Math.round((Date.now()-ts)/1000));if(sec<5)return 'Just now';if(sec<60)return `${sec}s ago`;if(sec<3600)return `${Math.floor(sec/60)}m ago`;return `${Math.floor(sec/3600)}h ago`}
   let qrInstance=null;
   function renderQr(){const el=$('qrCode');if(!el||!room)return;el.innerHTML='';const link=`${location.origin}${location.pathname}#${encodeURIComponent(room)}`;if(window.QRCode){qrInstance=new QRCode(el,{text:link,width:132,height:132,colorDark:'#111318',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M})}else{el.textContent='QR unavailable — use Copy link instead.'}}
-  function renderSnapshot(items,stats){const counts={text:0,image:0,file:0};(items||[]).forEach(i=>{if(counts[i.type]!==undefined)counts[i.type]++});const t=$('snapText'),im=$('snapImage'),f=$('snapFile'),st=$('snapStorage'),la=$('snapLastActive');if(t)t.textContent=String(counts.text);if(im)im.textContent=String(counts.image);if(f)f.textContent=String(counts.file);if(st&&stats)st.textContent=`${fmtBytes(stats.usageBytes)} / ${fmtBytes(stats.maxRoomBytes)}`;const latest=(items&&items.length)?Math.max(...items.map(i=>Number(i.ts||0))):0;if(la)la.textContent=fmtSince(latest)}
+  function fmtDuration(sec){if(sec===null||sec===undefined)return '—';if(sec<=0)return 'Expiring…';const d=Math.floor(sec/86400),h=Math.floor((sec%86400)/3600),m=Math.floor((sec%3600)/60);if(d>0)return `${d}d ${h}h`;if(h>0)return `${h}h ${m}m`;return `${m}m`}
+  function renderSnapshot(items,stats){const counts={text:0,image:0,file:0};(items||[]).forEach(i=>{if(counts[i.type]!==undefined)counts[i.type]++});const t=$('snapText'),im=$('snapImage'),f=$('snapFile'),st=$('snapStorage'),la=$('snapLastActive'),ex=$('snapExpires');if(t)t.textContent=String(counts.text);if(im)im.textContent=String(counts.image);if(f)f.textContent=String(counts.file);if(st&&stats)st.textContent=`${fmtBytes(stats.usageBytes)} / ${fmtBytes(stats.maxRoomBytes)}`;const latest=(items&&items.length)?Math.max(...items.map(i=>Number(i.ts||0))):0;if(la)la.textContent=fmtSince(latest);if(ex)ex.textContent=fmtDuration(stats?stats.secondsRemaining:null)}
   function extOf(name){const p=String(name||'').split('.');return p.length>1?p.pop().toLowerCase():''}
   const EXT_GROUPS={pdf:['pdf'],doc:['doc','docx','odt','rtf'],xls:['xls','xlsx','ods','csv'],ppt:['ppt','pptx','odp','key'],zip:['zip','rar','7z','tar','gz','tgz','bz2'],audio:['mp3','wav','flac','m4a','aac','ogg','opus','wma'],video:['mp4','mov','webm','mkv','avi','m4v','wmv'],code:['js','jsx','ts','tsx','py','html','htm','css','scss','json','md','c','cpp','h','java','go','rb','php','sh','yml','yaml','xml','sql','swift','kt']};
   function fileCategory(item){if(item.type==='text')return 'text';if(item.type==='image')return 'image';const ext=extOf(item.name);for(const cat in EXT_GROUPS)if(EXT_GROUPS[cat].includes(ext))return cat;return 'generic'}
@@ -463,14 +496,16 @@
       if(item.type==='text'){actions.appendChild(button('Copy',async e=>{await copyTextItem();e.currentTarget.textContent='Copied';setTimeout(()=>e.currentTarget.textContent='Copy',1000)}))}
       if(item.type==='image'){actions.appendChild(button('Copy image',async e=>{const b=e.currentTarget;b.disabled=true;const before=b.textContent;await copyImageItem();b.textContent='Copied';setTimeout(()=>b.textContent=before,1000);b.disabled=false}));actions.appendChild(button('Download',()=>downloadItem(item,prog,card)))}
       if(item.type==='file')actions.appendChild(button('Download',()=>downloadItem(item,prog,card),'primary'));
+      actions.appendChild(button(item.pinned?'Unpin':'Pin',async e=>{const b=e.currentTarget;b.disabled=true;try{await apiJson({method:'POST',body:JSON.stringify({room,action:'setPinned',id:item.id,pinned:!item.pinned})});wakePolling();await refresh(false,false);toast(item.pinned?'Unpinned':'Pinned')}catch(err){toast(err.message||'Could not update pin','bad')}finally{b.disabled=false}}));
       actions.appendChild(button('Delete',async e=>{const b=e.currentTarget;b.disabled=true;try{setBusy(true);await apiJson({method:'DELETE',body:JSON.stringify({room,id:item.id})});if(blobCache.has(item.id)){URL.revokeObjectURL(blobCache.get(item.id));blobCache.delete(item.id)}wakePolling();await refresh(false,false);toast('Deleted')}catch(err){toast(err.message||'Delete failed','bad')}finally{setBusy(false);b.disabled=false;updateOnlineState()}},'danger'));actions.appendChild(prog);card.appendChild(actions);
+      if(item.pinned){const pin=document.createElement('div');pin.className='pinBadge';pin.title='Pinned — protected from auto-cleanup';pin.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.5 7 12v1h10v-1l-2-1.5V5a1 1 0 0 0-1-1H10a1 1 0 0 0-1 1z"/></svg>';card.appendChild(pin)}
       card.addEventListener('click',e=>{if(e.target.closest('.itemActions'))return;if(item.type==='text')copyTextItem();else if(item.type==='image')copyImageItem();else if(item.type==='file')downloadItem(item,prog,card)});
       card.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&!e.target.closest('.itemActions')){e.preventDefault();card.click()}});
       root.appendChild(card)})
   }
 
-  function enterRoom(value){const v=normalizeRoom(value);if(!roomValid(v)){$('codeInput').value=v;$('codeInput').focus();toast('Use 3–64 letters, numbers, dashes or underscores.','warn');return}clearPoll();idlePolls=0;lastRoomSignature='';roomEpoch++;room=v;localStorage.setItem('hotdrop:lastRoom',v);$('roomLabel').textContent=`Room: ${v}`;$('joinPanel').classList.add('hidden');$('board').classList.remove('hidden');history.replaceState(null,'','#'+encodeURIComponent(v));setSync('busy','Connecting…','Checking room');renderQr();refresh(true,false)}
-  function leaveRoom(){clearPoll();idlePolls=0;lastRoomSignature='';roomEpoch++;room=null;latestItems=[];for(const url of blobCache.values())URL.revokeObjectURL(url);blobCache.clear();$('board').classList.add('hidden');$('joinPanel').classList.remove('hidden');history.replaceState(null,'',location.pathname+location.search);const qc=$('qrCode');if(qc)qc.innerHTML='';$('codeInput').focus()}
+  function enterRoom(value){const v=normalizeRoom(value);if(!roomValid(v)){$('codeInput').value=v;$('codeInput').focus();toast('Use 3–64 letters, numbers, dashes or underscores.','warn');return}clearPoll();idlePolls=0;lastRoomSignature='';roomEpoch++;room=v;localStorage.setItem('hotdrop:lastRoom',v);saveRecentRoom(v);$('roomLabel').textContent=`Room: ${v}`;$('joinPanel').classList.add('hidden');$('board').classList.remove('hidden');history.replaceState(null,'','#'+encodeURIComponent(v));setSync('busy','Connecting…','Checking room');renderQr();refresh(true,false);if(pendingShare)processPendingShare()}
+  function leaveRoom(){clearPoll();idlePolls=0;lastRoomSignature='';roomEpoch++;room=null;latestItems=[];for(const url of blobCache.values())URL.revokeObjectURL(url);blobCache.clear();$('board').classList.add('hidden');$('joinPanel').classList.remove('hidden');history.replaceState(null,'',location.pathname+location.search);const qc=$('qrCode');if(qc)qc.innerHTML='';renderRecentRooms();$('codeInput').focus()}
 
   async function addText(){const val=$('textInput').value;if(!val.trim())return;setBusy(true);setNotice('Sending text…');try{const r=await apiJson({method:'POST',body:JSON.stringify({room,action:'addText',item:{id:uid(),type:'text',data:val,ts:Date.now()}})});$('textInput').value='';applyStats(r.stats);const n=(r.evicted||[]).length;setNotice(n?`Sent. Removed ${n} older item${n===1?'':'s'} to make space.`:'Sent and synced.','good');if(n)toast(`Made space by removing ${n} old item${n===1?'':'s'}`,'warn');wakePolling();await refresh(false,false)}catch(e){setNotice(e.message||'Could not send text.','bad')}finally{setBusy(false);updateOnlineState()}}
 
@@ -557,6 +592,25 @@
       full.addEventListener('click',onFull);comp.addEventListener('click',onComp);
     });
   }
+  async function processPendingShare(){
+    const share=pendingShare;pendingShare=null;
+    if(!share)return;
+    try{
+      const textParts=[];
+      if(share.title&&!share.text&&!share.url)textParts.push(share.title);
+      if(share.text)textParts.push(share.text);
+      if(share.url)textParts.push(share.url);
+      if(textParts.length){$('textInput').value=textParts.join('\n\n');await addText()}
+      if(share.files&&share.files.length){
+        const files=share.files.map(f=>{
+          const bin=atob(f.data);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+          return new File([bytes],f.name||'shared-file',{type:f.mime||'application/octet-stream'});
+        });
+        await processFiles(files);
+      }
+      toast('Shared content sent to this room');
+    }catch(e){toast('Could not send shared content','bad')}
+  }
   async function processFiles(fileList){const files=[...fileList].filter(Boolean);if(!files.length)return;if(uploadActive){toast('A transfer is already in progress — add these files again when it finishes.','warn');return}uploadActive=true;setBusy(true);$('dropZone').classList.remove('drag');let done=0,evicted=0,failed=[];try{
       const thresholdBytes=settings.compressionThresholdMB*1024*1024;
       const qualifying=[];files.forEach((f,i)=>{if(f.type&&f.type.startsWith('image/')&&f.size>thresholdBytes)qualifying.push(i)});
@@ -577,6 +631,7 @@
   $('shareBtn').onclick=async()=>{const link=`${location.origin}${location.pathname}#${encodeURIComponent(room)}`;try{await navigator.clipboard.writeText(link);toast('Room link copied')}catch(_){window.prompt('Copy this room link:',link)}};
   $('addTextBtn').onclick=addText;$('clearTextBtn').onclick=()=>{$('textInput').value='';$('textInput').focus()};$('pasteBtn').onclick=pasteClipboard;$('textInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();addText()}});
   $('refreshBtn').onclick=()=>{wakePolling();refresh(true,false)};
+  $('clearRecentRooms').onclick=()=>{try{localStorage.removeItem(RECENT_ROOMS_KEY)}catch(_){}renderRecentRooms()};
   function populateSettingsForm(){
     const mode=settings.compressionMode;
     $('compAsk').checked=mode==='ask';$('compAlways').checked=mode==='always';$('compNever').checked=mode==='never';
@@ -620,7 +675,7 @@
     if(room&&!uploadActive){wakePolling();refresh(false,false)}
   });
 
-  const hash=decodeURIComponent(location.hash.replace(/^#/, '')).trim();if(hash)enterRoom(hash);else{const last=localStorage.getItem('hotdrop:lastRoom');if(last)$('codeInput').value=last}
+  const hash=decodeURIComponent(location.hash.replace(/^#/, '')).trim();if(hash)enterRoom(hash);else{const last=localStorage.getItem('hotdrop:lastRoom');if(last)$('codeInput').value=last;renderRecentRooms()}
 })();
 </script>
 </body></html>

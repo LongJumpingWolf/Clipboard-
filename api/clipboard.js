@@ -122,7 +122,8 @@ function publicItem(meta) {
     type: meta.type,
     ts: Number(meta.ts || 0),
     size: Number(meta.size || 0),
-    storedBytes: Number(meta.storedBytes || 0)
+    storedBytes: Number(meta.storedBytes || 0),
+    pinned: !!meta.pinned
   };
   if (meta.type === 'text') clean.data = String(meta.data || '');
   else {
@@ -134,7 +135,7 @@ function publicItem(meta) {
   return clean;
 }
 
-function roomStats(items) {
+function roomStats(items, ttlSecondsRemaining) {
   const ready = items.filter(x => x.status !== 'uploading');
   return {
     itemCount: ready.length,
@@ -143,7 +144,8 @@ function roomStats(items) {
     maxItems: MAX_ITEMS_PER_ROOM,
     maxFileBytes: MAX_FILE_BYTES,
     chunkBytes: CHUNK_BYTES,
-    ttlSeconds: ROOM_TTL_SECONDS
+    ttlSeconds: ROOM_TTL_SECONDS,
+    secondsRemaining: Number.isFinite(ttlSecondsRemaining) && ttlSecondsRemaining >= 0 ? ttlSecondsRemaining : null
   };
 }
 
@@ -199,11 +201,26 @@ function chooseVictims(items, incomingBytes, incomingId) {
   let count = kept.length;
   const victims = [...stale];
 
-  for (const item of kept) {
+  // Pinned items are protected from routine cleanup — evict unpinned items first, oldest first.
+  const unpinned = kept.filter(x => !x.pinned);
+  const pinned = kept.filter(x => x.pinned);
+
+  for (const item of unpinned) {
     if (usage + incomingBytes <= MAX_ROOM_BYTES && count + 1 <= MAX_ITEMS_PER_ROOM) break;
     victims.push(item);
     usage -= Number(item.storedBytes || 0);
     count -= 1;
+  }
+
+  // Last resort only: if unpinned items alone can't make room, pinned items become eligible too,
+  // so a room can never be permanently deadlocked by pins.
+  if (usage + incomingBytes > MAX_ROOM_BYTES || count + 1 > MAX_ITEMS_PER_ROOM) {
+    for (const item of pinned) {
+      if (usage + incomingBytes <= MAX_ROOM_BYTES && count + 1 <= MAX_ITEMS_PER_ROOM) break;
+      victims.push(item);
+      usage -= Number(item.storedBytes || 0);
+      count -= 1;
+    }
   }
 
   if (usage + incomingBytes > MAX_ROOM_BYTES) {
@@ -265,10 +282,12 @@ module.exports = async function handler(req, res) {
       const result = await redisCommand(['HGETALL', metaKey(room)]);
       const all = parseHashResult(result);
       const ready = all.filter(item => item.status !== 'uploading');
+      let ttl = null;
+      try { const t = await redisCommand(['TTL', metaKey(room)]); ttl = Number(t); if (!Number.isFinite(ttl) || ttl < 0) ttl = null; } catch (_) { ttl = null; }
       setJsonHeaders(res);
       return res.status(200).json({
         items: ready.slice(-MAX_ITEMS_PER_ROOM).map(publicItem),
-        stats: roomStats(all)
+        stats: roomStats(all, ttl)
       });
     }
 
@@ -411,6 +430,21 @@ module.exports = async function handler(req, res) {
         await redisPipeline(metaDeleteCommands(room, [meta]));
         setJsonHeaders(res);
         return res.status(200).json({ ok: true });
+      }
+
+      if (action === 'setPinned') {
+        const id = String(body.id || '');
+        if (!validId(id)) return sendError(res, 400, 'Invalid item id.');
+        const rawMeta = await redisCommand(['HGET', key, id]);
+        if (!rawMeta) return sendError(res, 404, 'Item no longer exists.');
+        const meta = typeof rawMeta === 'string' ? JSON.parse(rawMeta) : rawMeta;
+        meta.pinned = !!body.pinned;
+        await redisPipeline([
+          ['HSET', key, id, JSON.stringify(meta)],
+          ['EXPIRE', key, ROOM_TTL_SECONDS]
+        ]);
+        setJsonHeaders(res);
+        return res.status(200).json({ ok: true, pinned: meta.pinned });
       }
 
       return sendError(res, 400, 'Unknown action.');

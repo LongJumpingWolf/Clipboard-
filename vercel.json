@@ -3,6 +3,9 @@
   "functions": {
     "api/clipboard.js": {
       "maxDuration": 10
+    },
+    "api/share-target.js": {
+      "maxDuration": 10
     }
   },
   "headers": [

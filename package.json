@@ -1,0 +1,8 @@
+{
+  "name": "hotdrop",
+  "private": true,
+  "description": "Dev-only manifest — HotDrop itself ships as static files + zero-dependency serverless functions. This just gives `npm test` a home.",
+  "scripts": {
+    "test": "node test/run.js"
+  }
+}
