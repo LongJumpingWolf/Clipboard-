@@ -63,6 +63,13 @@ function execCommand(cmd) {
       const [key] = args;
       return store.strings[key] !== undefined ? store.strings[key] : null;
     }
+    case 'INCR': {
+      const [key] = args;
+      const current = Number(store.strings[key] || 0);
+      const next = current + 1;
+      store.strings[key] = String(next);
+      return next;
+    }
     case 'SET': {
       const [key, val, ...rest] = args;
       store.strings[key] = val;

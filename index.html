@@ -14,7 +14,7 @@
   <link rel="manifest" href="icons/site.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Press+Start+2P&display=swap" rel="stylesheet">
   <style>
     :root{
       --bg:#0e1018;--panel:#171a22;--panel2:#0c0e15;--text:#eceef2;--muted:#87909e;--line:#242833;
@@ -200,6 +200,12 @@
     .checkRow input{accent-color:var(--accent);width:15px;height:15px}
     .dangerZone{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
     .dangerZone .settingsRow{display:flex;align-items:center;justify-content:space-between;gap:14px}
+    .usageZone{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+    .pixMeterCard{background:#0b0d12;border:3px solid #000;border-radius:4px;padding:12px 12px 10px;margin-top:2px}
+    .pixMeterLabel{font-family:'Press Start 2P',monospace;font-size:9px;color:#ffd166;margin-bottom:9px;letter-spacing:.03em}
+    .pixMeterTrack{background:#000;border:2px solid #fff;padding:3px;display:flex;gap:2px}
+    .pixSeg{flex:1;height:16px;background:#222}
+    .pixMeterFoot{display:flex;justify-content:space-between;margin-top:8px;font-family:'Press Start 2P',monospace;font-size:9px;color:#fff}
 
     @media(min-width:980px){
       .app{max-width:1040px}
@@ -328,6 +334,15 @@
           <div class="settingsInline"><input id="compQuality" type="range" min="30" max="95" step="5"><span id="compQualityLabel">70%</span></div>
         </div>
         <div class="settingsNote">Compression re-encodes images as JPEG and caps the longest edge at 2400px. Transparent areas become solid white, since JPEG doesn't support transparency. The original file on your device is never modified — only the uploaded copy is affected.</div>
+        <div class="usageZone">
+          <div class="settingsLabel">Monthly usage</div>
+          <div class="pixMeterCard">
+            <div class="pixMeterLabel">API BUDGET</div>
+            <div class="pixMeterTrack" id="pixMeterTrack"></div>
+            <div class="pixMeterFoot"><span id="pixMeterPct">—</span><span id="pixMeterCount">—</span></div>
+          </div>
+          <div class="settingsNote">An estimate of how much of the free hosting tier's shared monthly request budget has been used — across every room, not just this one. Resets automatically at the start of each month.</div>
+        </div>
         <div class="dangerZone">
           <div class="settingsLabel" style="color:var(--bad)">Danger zone</div>
           <div class="settingsRow" style="border-top:none;padding-top:0">
@@ -429,7 +444,27 @@
   let qrInstance=null;
   function renderQr(){const el=$('qrCode');if(!el||!room)return;el.innerHTML='';const link=`${location.origin}${location.pathname}#${encodeURIComponent(room)}`;if(window.QRCode){qrInstance=new QRCode(el,{text:link,width:132,height:132,colorDark:'#111318',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M})}else{el.textContent='QR unavailable — use Copy link instead.'}}
   function fmtDuration(sec){if(sec===null||sec===undefined)return '—';if(sec<=0)return 'Expiring…';const d=Math.floor(sec/86400),h=Math.floor((sec%86400)/3600),m=Math.floor((sec%3600)/60);if(d>0)return `${d}d ${h}h`;if(h>0)return `${h}h ${m}m`;return `${m}m`}
-  function renderSnapshot(items,stats){const counts={text:0,image:0,file:0};(items||[]).forEach(i=>{if(counts[i.type]!==undefined)counts[i.type]++});const t=$('snapText'),im=$('snapImage'),f=$('snapFile'),st=$('snapStorage'),la=$('snapLastActive'),ex=$('snapExpires');if(t)t.textContent=String(counts.text);if(im)im.textContent=String(counts.image);if(f)f.textContent=String(counts.file);if(st&&stats)st.textContent=`${fmtBytes(stats.usageBytes)} / ${fmtBytes(stats.maxRoomBytes)}`;const latest=(items&&items.length)?Math.max(...items.map(i=>Number(i.ts||0))):0;if(la)la.textContent=fmtSince(latest);if(ex)ex.textContent=fmtDuration(stats?stats.secondsRemaining:null)}
+  let lastKnownStats = null;
+  function renderPixelUsageMeter(stats){
+    const track=$('pixMeterTrack'),pctEl=$('pixMeterPct'),countEl=$('pixMeterCount');
+    if(!track||!pctEl||!countEl)return;
+    if(!stats||stats.monthlyRequests==null){track.innerHTML='';pctEl.textContent='—';countEl.textContent='—';return}
+    const budget=stats.monthlyRequestBudget||500000;
+    const used=stats.monthlyRequests;
+    const pct=Math.min(100,Math.round((used/budget)*100));
+    const segCount=10;
+    const litSegs=Math.round((pct/100)*segCount);
+    track.innerHTML='';
+    for(let i=0;i<segCount;i++){
+      const seg=document.createElement('div');seg.className='pixSeg';
+      if(i<litSegs){const segPct=(i+1)/segCount*100;seg.style.background=segPct<=50?'#4dff6a':(segPct<=80?'#e8d23e':'#ff5f6d')}
+      track.appendChild(seg);
+    }
+    const color=pct<=50?'#4dff6a':(pct<=80?'#e8d23e':'#ff5f6d');
+    pctEl.textContent=pct+'%';pctEl.style.color=color;
+    countEl.textContent=`${used.toLocaleString()} / ${budget.toLocaleString()}`;
+  }
+  function renderSnapshot(items,stats){const counts={text:0,image:0,file:0};(items||[]).forEach(i=>{if(counts[i.type]!==undefined)counts[i.type]++});const t=$('snapText'),im=$('snapImage'),f=$('snapFile'),st=$('snapStorage'),la=$('snapLastActive'),ex=$('snapExpires');if(t)t.textContent=String(counts.text);if(im)im.textContent=String(counts.image);if(f)f.textContent=String(counts.file);if(st&&stats)st.textContent=`${fmtBytes(stats.usageBytes)} / ${fmtBytes(stats.maxRoomBytes)}`;const latest=(items&&items.length)?Math.max(...items.map(i=>Number(i.ts||0))):0;if(la)la.textContent=fmtSince(latest);if(ex)ex.textContent=fmtDuration(stats?stats.secondsRemaining:null);lastKnownStats=stats;renderPixelUsageMeter(stats)}
   function extOf(name){const p=String(name||'').split('.');return p.length>1?p.pop().toLowerCase():''}
   const EXT_GROUPS={pdf:['pdf'],doc:['doc','docx','odt','rtf'],xls:['xls','xlsx','ods','csv'],ppt:['ppt','pptx','odp','key'],zip:['zip','rar','7z','tar','gz','tgz','bz2'],audio:['mp3','wav','flac','m4a','aac','ogg','opus','wma'],video:['mp4','mov','webm','mkv','avi','m4v','wmv'],code:['js','jsx','ts','tsx','py','html','htm','css','scss','json','md','c','cpp','h','java','go','rb','php','sh','yml','yaml','xml','sql','swift','kt']};
   function fileCategory(item){if(item.type==='text')return 'text';if(item.type==='image')return 'image';const ext=extOf(item.name);for(const cat in EXT_GROUPS)if(EXT_GROUPS[cat].includes(ext))return cat;return 'generic'}
@@ -667,6 +702,7 @@
     $('compQuality').value=settings.compressionQuality;
     $('compQualityLabel').textContent=settings.compressionQuality+'%';
     updateSettingsFormDisabled();
+    renderPixelUsageMeter(lastKnownStats);
   }
   function updateSettingsFormDisabled(){
     const never=$('compNever').checked;

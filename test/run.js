@@ -321,6 +321,32 @@ async function main() {
   }
 
   // ---------------------------------------------------------------
+  section('Monthly API usage tracking');
+  {
+    const room = 'usage-' + uid();
+    await test('monthlyRequests increments across requests and is exposed in stats', async () => {
+      const first = await listRoom(room);
+      const before = first.body.stats.monthlyRequests;
+      assert.strictEqual(typeof before, 'number');
+      assert.strictEqual(first.body.stats.monthlyRequestBudget, 500000);
+
+      await addTextItem(room, 'bump the counter', Date.now());
+      const second = await listRoom(room);
+      const after = second.body.stats.monthlyRequests;
+      assert.ok(after > before, `expected usage to increase (before=${before}, after=${after})`);
+    });
+
+    await test('usage counter is global, not per-room', async () => {
+      const roomA = 'usage-a-' + uid();
+      const roomB = 'usage-b-' + uid();
+      const a1 = await listRoom(roomA);
+      await listRoom(roomB); // activity in a different room
+      const a2 = await listRoom(roomA);
+      assert.ok(a2.body.stats.monthlyRequests > a1.body.stats.monthlyRequests, 'activity in any room should move the shared counter');
+    });
+  }
+
+  // ---------------------------------------------------------------
   section('Room expiry (TTL) surfaced correctly');
   {
     const room = 'ttl-' + uid();

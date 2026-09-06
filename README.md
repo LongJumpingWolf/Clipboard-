@@ -13,6 +13,7 @@ A lightweight cross-device drop for moving **text, images, and files** between y
 - **Settings screen** (gear icon, top-right) for image compression: ask every time, always compress over a size threshold to a set quality, or never compress
 - **Pin items** to protect them from the automatic storage cleanup — pinned items are only evicted as an absolute last resort if a room is completely full of pinned content
 - **Reset a room** — a Settings-screen "Danger zone" button that permanently deletes every item in the current room (for every device using it), behind a confirmation step
+- **Monthly usage meter** — an 8-bit pixel-style gauge in Settings estimating how much of the hosting tier's shared monthly request budget has been used, across all rooms
 - **Room expiry countdown** and a **recent rooms** list on the join screen for one-tap switching between rooms you use often
 - **Share sheet integration** (Android/Chrome installs only) — share a photo or link into HotDrop directly from any other app via the OS share sheet
 - Multiple file selection, clipboard-image paste support

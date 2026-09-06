@@ -6,6 +6,7 @@ const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_ROOM_BYTES = 32 * 1024 * 1024; // Estimated Redis bytes, including base64 overhead.
 const STALE_UPLOAD_MS = 15 * 60 * 1000;
 const MAX_THUMB_CHARS = 60 * 1024; // base64 chars; comfortably covers a ~480px JPEG preview
+const MONTHLY_REQUEST_BUDGET = 500000; // Upstash free-tier command budget, shared across the whole account
 
 function redisConfig() {
   const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
@@ -135,8 +136,9 @@ function publicItem(meta) {
   return clean;
 }
 
-function roomStats(items, ttlSecondsRemaining) {
+async function roomStats(items, ttlSecondsRemaining) {
   const ready = items.filter(x => x.status !== 'uploading');
+  const monthlyRequests = await getMonthlyUsage();
   return {
     itemCount: ready.length,
     usageBytes: items.reduce((sum, x) => sum + Number(x.storedBytes || 0), 0),
@@ -145,7 +147,9 @@ function roomStats(items, ttlSecondsRemaining) {
     maxFileBytes: MAX_FILE_BYTES,
     chunkBytes: CHUNK_BYTES,
     ttlSeconds: ROOM_TTL_SECONDS,
-    secondsRemaining: Number.isFinite(ttlSecondsRemaining) && ttlSecondsRemaining >= 0 ? ttlSecondsRemaining : null
+    secondsRemaining: Number.isFinite(ttlSecondsRemaining) && ttlSecondsRemaining >= 0 ? ttlSecondsRemaining : null,
+    monthlyRequests: monthlyRequests,
+    monthlyRequestBudget: MONTHLY_REQUEST_BUDGET
   };
 }
 
@@ -235,6 +239,40 @@ function setJsonHeaders(res) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 }
 
+function usageKey() {
+  // One key per calendar month (UTC) -- naturally resets each month with no
+  // explicit cleanup needed; the EXPIRE below just keeps old months from
+  // lingering forever.
+  return `usage:requests:${new Date().toISOString().slice(0, 7)}`;
+}
+
+// Best-effort, approximate proxy for Upstash's actual billed command count --
+// not exact (a single request can cost more than one real Redis command
+// under the hood, and this increment itself adds to the count), but close
+// enough to give an honest sense of how close the free tier's monthly ceiling
+// is, without needing a separate Upstash Management API credential just to
+// fetch the real number. Never allowed to fail the actual request.
+async function recordApiUsage() {
+  try {
+    await redisPipeline([
+      ['INCR', usageKey()],
+      ['EXPIRE', usageKey(), 60 * 60 * 24 * 40]
+    ]);
+  } catch (_) {
+    // tracking must never break the real request
+  }
+}
+
+async function getMonthlyUsage() {
+  try {
+    const raw = await redisCommand(['GET', usageKey()]);
+    const count = Number(raw);
+    return Number.isFinite(count) ? count : 0;
+  } catch (_) {
+    return null;
+  }
+}
+
 function sendError(res, status, message) {
   setJsonHeaders(res);
   return res.status(status).json({ error: message });
@@ -245,6 +283,8 @@ module.exports = async function handler(req, res) {
     res.status(204).end();
     return;
   }
+
+  await recordApiUsage();
 
   try {
     if (req.method === 'GET') {
@@ -287,7 +327,7 @@ module.exports = async function handler(req, res) {
       setJsonHeaders(res);
       return res.status(200).json({
         items: ready.slice(-MAX_ITEMS_PER_ROOM).map(publicItem),
-        stats: roomStats(all, ttl)
+        stats: await roomStats(all, ttl)
       });
     }
 
@@ -325,7 +365,7 @@ module.exports = async function handler(req, res) {
         await redisPipeline(commands);
         const updated = existing.filter(x => x.id !== item.id && !victims.some(v => v.id === x.id)).concat(meta);
         setJsonHeaders(res);
-        return res.status(201).json({ ok: true, evicted: victims.map(publicItem), stats: roomStats(updated) });
+        return res.status(201).json({ ok: true, evicted: victims.map(publicItem), stats: await roomStats(updated) });
       }
 
       if (action === 'initBinary') {
@@ -363,7 +403,7 @@ module.exports = async function handler(req, res) {
         await redisPipeline(commands);
         const updated = existing.filter(x => x.id !== item.id && !victims.some(v => v.id === x.id)).concat(meta);
         setJsonHeaders(res);
-        return res.status(201).json({ ok: true, evicted: victims.map(publicItem), stats: roomStats(updated) });
+        return res.status(201).json({ ok: true, evicted: victims.map(publicItem), stats: await roomStats(updated) });
       }
 
       if (action === 'uploadChunk') {
@@ -415,7 +455,7 @@ module.exports = async function handler(req, res) {
         ]);
         const all = parseHashResult(await redisCommand(['HGETALL', key]));
         setJsonHeaders(res);
-        return res.status(200).json({ ok: true, item: publicItem(meta), stats: roomStats(all) });
+        return res.status(200).json({ ok: true, item: publicItem(meta), stats: await roomStats(all) });
       }
 
       if (action === 'cancelBinary') {
@@ -460,7 +500,7 @@ module.exports = async function handler(req, res) {
         if (blobKeys.length) commands.push(['DEL', ...blobKeys]);
         await redisPipeline(commands);
         setJsonHeaders(res);
-        return res.status(200).json({ ok: true, removed: all.length, stats: roomStats([], null) });
+        return res.status(200).json({ ok: true, removed: all.length, stats: await roomStats([], null) });
       }
 
       return sendError(res, 400, 'Unknown action.');
