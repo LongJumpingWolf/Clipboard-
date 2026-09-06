@@ -200,8 +200,7 @@
     .checkRow input{accent-color:var(--accent);width:15px;height:15px}
     .dangerZone{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
     .dangerZone .settingsRow{display:flex;align-items:center;justify-content:space-between;gap:14px}
-    .usageZone{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
-    .pixMeterCard{background:#0b0d12;border:3px solid #000;border-radius:4px;padding:12px 12px 10px;margin-top:2px}
+    .pixMeterCard{background:#0b0d12;border:3px solid #000;border-radius:4px;padding:12px 12px 10px;margin-top:8px}
     .pixMeterLabel{font-family:'Press Start 2P',monospace;font-size:9px;color:#ffd166;margin-bottom:9px;letter-spacing:.03em}
     .pixMeterTrack{background:#000;border:2px solid #fff;padding:3px;display:flex;gap:2px}
     .pixSeg{flex:1;height:16px;background:#222}
@@ -306,6 +305,12 @@
           <div class="snapRow"><span>Storage used</span><span id="snapStorage">—</span></div>
           <div class="snapRow"><span>Last activity</span><span id="snapLastActive">—</span></div>
           <div class="snapRow"><span>Room expires</span><span id="snapExpires">—</span></div>
+          <div class="snapDivider"></div>
+          <div class="pixMeterCard">
+            <div class="pixMeterLabel">MONTHLY API BUDGET (ALL ROOMS)</div>
+            <div class="pixMeterTrack" id="pixMeterTrack"></div>
+            <div class="pixMeterFoot"><span id="pixMeterPct">—</span><span id="pixMeterCount">—</span></div>
+          </div>
         </div>
       </aside>
     </div>
@@ -334,15 +339,6 @@
           <div class="settingsInline"><input id="compQuality" type="range" min="30" max="95" step="5"><span id="compQualityLabel">70%</span></div>
         </div>
         <div class="settingsNote">Compression re-encodes images as JPEG and caps the longest edge at 2400px. Transparent areas become solid white, since JPEG doesn't support transparency. The original file on your device is never modified — only the uploaded copy is affected.</div>
-        <div class="usageZone">
-          <div class="settingsLabel">Monthly usage</div>
-          <div class="pixMeterCard">
-            <div class="pixMeterLabel">API BUDGET</div>
-            <div class="pixMeterTrack" id="pixMeterTrack"></div>
-            <div class="pixMeterFoot"><span id="pixMeterPct">—</span><span id="pixMeterCount">—</span></div>
-          </div>
-          <div class="settingsNote">An estimate of how much of the free hosting tier's shared monthly request budget has been used — across every room, not just this one. Resets automatically at the start of each month.</div>
-        </div>
         <div class="dangerZone">
           <div class="settingsLabel" style="color:var(--bad)">Danger zone</div>
           <div class="settingsRow" style="border-top:none;padding-top:0">
@@ -702,7 +698,6 @@
     $('compQuality').value=settings.compressionQuality;
     $('compQualityLabel').textContent=settings.compressionQuality+'%';
     updateSettingsFormDisabled();
-    renderPixelUsageMeter(lastKnownStats);
   }
   function updateSettingsFormDisabled(){
     const never=$('compNever').checked;
