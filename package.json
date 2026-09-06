@@ -3,9 +3,10 @@
   "private": true,
   "description": "Dev-only manifest — HotDrop itself ships as static files + zero-dependency serverless functions. jsdom is a dev-only dependency used by the frontend sync tests.",
   "scripts": {
-    "test": "node test/run.js && node test/sync.js",
+    "test": "node test/run.js && node test/sync.js && node test/zip.js",
     "test:backend": "node test/run.js",
-    "test:sync": "node test/sync.js"
+    "test:sync": "node test/sync.js",
+    "test:zip": "node test/zip.js"
   },
   "devDependencies": {
     "jsdom": "^26.0.0"

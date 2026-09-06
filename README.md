@@ -15,6 +15,7 @@ A lightweight cross-device drop for moving **text, images, and files** between y
 - **Reset a room** — a Settings-screen "Danger zone" button that permanently deletes every item in the current room (for every device using it), behind a confirmation step
 - **Room tabs** — keep several rooms open at once and switch between them like browser tabs. Only the active tab polls; background tabs go fully to sleep (zero requests) until you switch back, then refresh instantly and show a "N new since you last looked" hint.
 - **Monthly usage meter** — an 8-bit pixel-style gauge in the session snapshot estimating how much of the hosting tier's shared monthly request budget has been used, across all rooms
+- **Download all as ZIP** — grabs every item in the room (text saved as `.txt`, files/images as themselves) into one ZIP file, with each entry's modification date set to when it was actually uploaded, not when the ZIP was built
 - **Room expiry countdown** and a **recent rooms** list on the join screen for one-tap switching between rooms you use often
 - **Share sheet integration** (Android/Chrome installs only) — share a photo or link into HotDrop directly from any other app via the OS share sheet
 - Multiple file selection, clipboard-image paste support
@@ -102,6 +103,9 @@ Two suites, run both with `npm test`:
 - Switching to a sleeping tab refreshing immediately, with its own data and no leakage from the previous room
 - Failed requests leaving the last good data intact, and not permanently sticking the busy/sync indicator
 - Rapid switching between three rooms with all responses resolved in scrambled order, ending on a tab whose feed matches that tab
+- Clicking "Download all" and getting a real, valid ZIP file back — this test actually builds a file in a real DOM, writes the produced bytes to disk, and runs the system `unzip -t`/`unzip -l` against it to verify integrity and that each entry's timestamp matches its original upload time, not download time
+
+**ZIP writer** (`node test/zip.js`) — the "Download all" feature's ZIP-writing code, verified against the real system `unzip`/`zipinfo` tools rather than trusted on faith: byte-for-byte content round-trips, per-file timestamps matching what was requested (not build time), unicode filenames, and the filename-sanitization/de-duplication logic that stops a crafted item name from creating unexpected nested folders in the archive. Runs its byte-level checks only if `unzip`/`zipinfo` are present on the machine running the tests; the structural checks always run.
 
 Neither suite touches your real Redis or Vercel deployment — everything runs in-process. `jsdom` is the only dependency and is dev-only; the shipped app still has zero runtime dependencies.
 

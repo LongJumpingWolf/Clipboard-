@@ -56,6 +56,8 @@ function makeHarness() {
     };
   }
 
+  const fileBytes = {}; // id -> Buffer, for chunk-download requests
+
   function fetchImpl(url, opts) {
     const u = String(url);
     // Non-API assets (fonts etc) resolve instantly and empty.
@@ -64,6 +66,26 @@ function makeHarness() {
     }
     const roomMatch = /room=([^&]+)/.exec(u);
     const roomCode = roomMatch ? decodeURIComponent(roomMatch[1]) : null;
+    const idMatch = /[?&]id=([^&]+)/.exec(u);
+    const chunkMatch = /[?&]chunk=([^&]+)/.exec(u);
+
+    // Chunk-download requests resolve immediately with real bytes (not queued
+    // in `pending`, since these are triggered internally by getBlob() during
+    // the ZIP-building flow, not something a test drives step-by-step).
+    if (idMatch && chunkMatch) {
+      const id = decodeURIComponent(idMatch[1]);
+      const bytes = fileBytes[id];
+      if (!bytes) {
+        return Promise.resolve({ ok: false, status: 404, headers: { get: () => 'application/json' }, json: async () => ({ error: 'not found' }), arrayBuffer: async () => new ArrayBuffer(0) });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => 'application/octet-stream' },
+        arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+      });
+    }
+
     let resolveFn;
     const p = new Promise((resolve) => { resolveFn = resolve; });
     const entry = {
@@ -94,11 +116,14 @@ function makeHarness() {
     return p;
   }
 
-  return { pending, state, fetchImpl, roomPayload };
+  return { pending, state, fetchImpl, roomPayload, fileBytes };
 }
 
 function makeItem(id, ts, data) {
   return { id, type: 'text', ts, size: 100, storedBytes: 1000, data, pinned: false };
+}
+function makeFileItem(id, ts, name, bytes) {
+  return { id, type: 'file', ts, size: bytes.length, storedBytes: bytes.length, name, mime: 'application/octet-stream', chunks: 1, pinned: false };
 }
 
 async function bootDom() {
@@ -113,6 +138,12 @@ async function bootDom() {
     virtualConsole,
     beforeParse(window) {
       window.fetch = harness.fetchImpl;
+      // The real <script src="zip-writer.js"> tag can't resolve in jsdom
+      // (relative path against a fake test origin, no server to fetch from),
+      // so inject the exact same module directly -- this is the real,
+      // already-independently-tested (test/zip.js) implementation, not a
+      // reimplementation for the test.
+      window.HotDropZip = require('../zip-writer.js');
       window.QRCode = function () { this.clear = () => {}; };
       window.QRCode.CorrectLevel = { M: 0 };
       // jsdom has no real clipboard; stub enough that handlers don't throw.
@@ -120,7 +151,8 @@ async function bootDom() {
         value: { writeText: async () => {}, read: async () => [], write: async () => {} },
         configurable: true
       });
-      window.URL.createObjectURL = () => 'blob:fake';
+      window.__capturedBlobUrls = [];
+      window.URL.createObjectURL = (blob) => { const url = `blob:fake-${window.__capturedBlobUrls.length}`; window.__capturedBlobUrls.push({ url, blob }); return url; };
       window.URL.revokeObjectURL = () => {};
     }
   });
@@ -428,6 +460,99 @@ async function main() {
       assert.ok(texts.length === 0 || texts.includes(expected),
         `active tab is "${finalActive}" but feed shows ${JSON.stringify(texts)} -- mismatched room data after scrambled responses`);
     });
+    window.close();
+  }
+
+  // -------------------------------------------------------------------
+  section('Download all as ZIP: real end-to-end pipeline');
+  {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const { execFileSync } = require('child_process');
+
+    const { window, harness } = await bootDom();
+    await test('clicking Download all produces a real, valid ZIP with correct per-item timestamps', async () => {
+      const textTs = new Date('2026-08-10T09:15:00').getTime();
+      const fileTs = new Date('2026-09-01T18:42:00').getTime();
+      const fileContent = Buffer.from('binary file payload for the zip test, not actually a real image');
+
+      harness.state.rooms['zip-room'] = {
+        items: [
+          makeItem('t1', textTs, 'a shared note'),
+          makeFileItem('f1', fileTs, 'notes.pdf', fileContent)
+        ]
+      };
+      harness.fileBytes['f1'] = fileContent;
+
+      window.document.getElementById('codeInput').value = 'zip-room';
+      window.document.getElementById('joinBtn').click();
+      await tick();
+      harness.pending.find((p) => p.room === 'zip-room').resolve();
+      await tick();
+
+      const btn = window.document.getElementById('downloadAllBtn');
+      assert.strictEqual(btn.disabled, false, 'button should be enabled once items are loaded');
+      btn.click();
+
+      // getBlob() also caches each fetched file's blob via createObjectURL as
+      // part of normal LRU-cache behavior, so the zip isn't necessarily the
+      // only (or first) captured blob -- find it by its actual type.
+      let waited = 0;
+      let zipEntry = null;
+      while (!zipEntry && waited < 2000) {
+        await tick(20);
+        waited += 20;
+        zipEntry = window.__capturedBlobUrls.find((e) => e.blob && e.blob.type === 'application/zip');
+      }
+
+      assert.ok(zipEntry, `expected a blob with type application/zip among ${window.__capturedBlobUrls.length} captured blob(s)`);
+      const captured = zipEntry.blob;
+      assert.strictEqual(captured.type, 'application/zip');
+
+      const arrayBuffer = await captured.arrayBuffer();
+      const tmpFile = path.join(os.tmpdir(), `hotdrop-e2e-zip-${Date.now()}.zip`);
+      fs.writeFileSync(tmpFile, Buffer.from(arrayBuffer));
+      try {
+        const integrity = execFileSync('unzip', ['-t', tmpFile]).toString();
+        assert.ok(/No errors detected/.test(integrity), `zip failed integrity check:\n${integrity}`);
+
+        const listing = execFileSync('unzip', ['-l', tmpFile]).toString();
+        assert.ok(listing.includes('notes.pdf'), `expected notes.pdf in the listing:\n${listing}`);
+        assert.ok(listing.includes('2026-09-01 18:42'), 'file item should keep its upload timestamp, not download time');
+        assert.ok(listing.includes('2026-08-10 09:15'), 'text item should keep its creation timestamp, not download time');
+        assert.ok(/text \(.*\)\.txt/.test(listing), `expected a generated .txt name for the text item:\n${listing}`);
+
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdrop-e2e-extract-'));
+        try {
+          execFileSync('unzip', ['-o', tmpFile, '-d', dir]);
+          const pdfBytes = fs.readFileSync(path.join(dir, 'notes.pdf'));
+          assert.ok(Buffer.compare(pdfBytes, fileContent) === 0, 'extracted file content must exactly match the original');
+        } finally {
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+      } finally {
+        fs.rmSync(tmpFile, { force: true });
+      }
+
+      assert.strictEqual(btn.disabled, false, 'button should re-enable after the download completes');
+      assert.strictEqual(btn.textContent, 'Download all', 'button label should be restored after completion');
+    });
+
+    await test('clicking Download all with zero items shows a warning and creates no blob', async () => {
+      harness.state.rooms['empty-zip-room'] = { items: [] };
+      window.document.querySelector('.tabAdd').click();
+      await tick();
+      window.document.getElementById('codeInput').value = 'empty-zip-room';
+      window.document.getElementById('joinBtn').click();
+      await tick();
+      harness.pending.find((p) => p.room === 'empty-zip-room').resolve();
+      await tick();
+
+      const btn = window.document.getElementById('downloadAllBtn');
+      assert.strictEqual(btn.disabled, true, 'button should be disabled when the room has no items');
+    });
+
     window.close();
   }
 

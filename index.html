@@ -82,7 +82,7 @@
     .feedHead{display:flex;align-items:center;gap:10px;margin-bottom:12px}
     .feedTitle{font-size:12px;font-weight:650;color:var(--muted)}
     .feedCount{font-size:10.5px;color:var(--text);background:var(--panel);border:1px solid var(--line);padding:2px 7px;border-radius:999px}
-    .feedHead .btn{margin-left:auto}
+    .feedHead .pushRight{margin-left:auto}
     .empty{text-align:center;padding:60px 12px;color:var(--muted);margin:auto}
     .emptyIcon{font-size:26px;margin-bottom:10px;opacity:.5}
     .emptyTitle{font-size:13.5px;font-weight:650;color:#c9cdd6}
@@ -287,7 +287,7 @@
       </details>
 
       <div class="feed">
-        <div class="feedHead"><span class="feedTitle">Recent items</span><span id="feedCount" class="feedCount">0</span><button id="refreshBtn" class="btn small" title="Refresh">Refresh</button></div>
+        <div class="feedHead"><span class="feedTitle">Recent items</span><span id="feedCount" class="feedCount">0</span><button id="downloadAllBtn" class="btn small pushRight" title="Download every item in this room as one ZIP file">Download all</button><button id="refreshBtn" class="btn small" title="Refresh">Refresh</button></div>
         <div id="items"></div>
       </div>
 
@@ -402,6 +402,7 @@
     window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); });
   }
 </script>
+<script src="zip-writer.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 (() => {
@@ -617,7 +618,7 @@
   function prefetchImage(item){if(item.type!=='image'||!room)return;if(blobCache.has(item.id)||prefetching.has(item.id))return;if(item.size>PREFETCH_MAX_BYTES)return;prefetching.add(item.id);getBlob(item).catch(()=>{}).finally(()=>prefetching.delete(item.id))}
   async function downloadItem(item,progressEl,cardEl){try{setBusy(true);progressEl.textContent='Preparing 0%';const blob=await getBlob(item,p=>progressEl.textContent=`Preparing ${Math.round(p*100)}%`);const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=item.name||'download';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2500);progressEl.textContent='';toast('Download ready');flashCard(cardEl,'Downloaded')}catch(e){progressEl.textContent='';toast(e.message||'Download failed','bad')}finally{setBusy(false);updateOnlineState()}}
 
-  function renderItems(items){const root=$('items');root.replaceChildren();$('feedCount').textContent=String(items.length);cleanupBlobCache(new Set(items.map(x=>x.id)));if(!items.length){const e=document.createElement('div');e.className='empty';e.innerHTML='<div class="emptyIcon">⇄</div><div class="emptyTitle">Nothing here yet</div><div class="emptySub">Paste text or drop a file above and it will appear on your other device.</div>';root.appendChild(e);return}
+  function renderItems(items){const root=$('items');root.replaceChildren();$('feedCount').textContent=String(items.length);const dlBtn=$('downloadAllBtn');if(dlBtn)dlBtn.disabled=!items.length;cleanupBlobCache(new Set(items.map(x=>x.id)));if(!items.length){const e=document.createElement('div');e.className='empty';e.innerHTML='<div class="emptyIcon">⇄</div><div class="emptyTitle">Nothing here yet</div><div class="emptySub">Paste text or drop a file above and it will appear on your other device.</div>';root.appendChild(e);return}
     [...items].sort((a,b)=>b.ts-a.ts).forEach(item=>{const cat=fileCategory(item);const card=document.createElement('article');card.className='item';card.tabIndex=0;const top=document.createElement('div');top.className='itemTop';const ico=document.createElement('div');ico.className='typeIcon cat-'+cat;ico.innerHTML=glyphFor(cat);const main=document.createElement('div');main.className='itemMain';const name=document.createElement('div');name.className='itemName';name.textContent=item.type==='text'?'Text snippet':(item.name||'File');const meta=document.createElement('div');meta.className='itemMeta';meta.textContent=`${new Date(item.ts).toLocaleString()}${item.type==='text'?'':` · ${fmtBytes(item.size)}`}`;main.append(name,meta);top.append(ico,main);card.appendChild(top);
       if(item.type==='text'){const body=document.createElement('div');body.className='textBody';body.textContent=item.data;card.appendChild(body)}
       if(item.type==='image'){prefetchImage(item);const wrap=document.createElement('div');wrap.className='imageWrap';
@@ -834,6 +835,69 @@
   $('copyCodeBtn').onclick=async()=>{try{await navigator.clipboard.writeText(room);toast('Room code copied')}catch(_){window.prompt('Copy this room code:',room)}};
   $('shareBtn').onclick=async()=>{const link=`${location.origin}${location.pathname}#${encodeURIComponent(room)}`;try{await navigator.clipboard.writeText(link);toast('Room link copied')}catch(_){window.prompt('Copy this room link:',link)}};
   $('addTextBtn').onclick=addText;$('clearTextBtn').onclick=()=>{$('textInput').value='';$('textInput').focus()};$('pasteBtn').onclick=pasteClipboard;$('textInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();addText()}});
+  async function downloadAllAsZip(){
+    if(!room)return;
+    if(!latestItems.length){toast('Nothing to download','warn');return}
+    const btn=$('downloadAllBtn');
+    const originalText=btn.textContent;
+    btn.disabled=true;
+    const sorted=[...latestItems].sort((a,b)=>a.ts-b.ts);
+    const entries=[];
+    const usedNames=new Set();
+    const failed=[];
+    const total=sorted.length;
+    let done=0;
+    for(const item of sorted){
+      btn.textContent=`Zipping ${done+1}/${total}…`;
+      try{
+        const dateObj=new Date(item.ts||Date.now());
+        let bytes,rawName;
+        if(item.type==='text'){
+          bytes=new TextEncoder().encode(item.data||'');
+          const stamp=dateObj.toISOString().slice(0,16).replace('T',' ').replace(':','');
+          rawName=`text (${stamp}).txt`;
+        }else{
+          const blob=await getBlob(item);
+          bytes=new Uint8Array(await blob.arrayBuffer());
+          rawName=item.name||'file';
+        }
+        const name=HotDropZip.safeZipName(rawName,usedNames);
+        entries.push({name,data:bytes,date:dateObj});
+      }catch(err){
+        failed.push(item.type==='text'?'Text snippet':(item.name||'file'));
+      }
+      done++;
+    }
+    if(!entries.length){
+      btn.disabled=false;btn.textContent=originalText;
+      toast('Could not build the ZIP — every item failed to load','bad');
+      return;
+    }
+    btn.textContent='Building ZIP…';
+    let zipBytes;
+    try{
+      zipBytes=HotDropZip.buildZip(entries);
+    }catch(err){
+      btn.disabled=false;btn.textContent=originalText;
+      toast('Could not build the ZIP file','bad');
+      return;
+    }
+    const blob=new Blob([zipBytes],{type:'application/zip'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    const stamp=new Date().toISOString().slice(0,10);
+    a.href=url;a.download=`hotdrop-${room}-${stamp}.zip`;
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),4000);
+    btn.disabled=false;btn.textContent=originalText;
+    if(failed.length){
+      const shown=failed.slice(0,3).join(', ')+(failed.length>3?'…':'');
+      toast(`Downloaded ${entries.length} of ${total} — ${failed.length} failed: ${shown}`,'warn');
+    }else{
+      toast(`Downloaded all ${entries.length} item${entries.length===1?'':'s'} as a ZIP`);
+    }
+  }
+  $('downloadAllBtn').onclick=downloadAllAsZip;
   $('refreshBtn').onclick=()=>{wakePolling();refresh(true,false)};
   $('clearRecentRooms').onclick=()=>{try{localStorage.removeItem(RECENT_ROOMS_KEY)}catch(_){}renderRecentRooms()};
   function populateSettingsForm(){
