@@ -464,6 +464,50 @@ async function main() {
   }
 
   // -------------------------------------------------------------------
+  section('Blob cache hits never re-fetch (this is what broke on Safari)');
+  {
+    const { window, harness } = await bootDom();
+    await test('a second copy/download of the same item makes no additional network request', async () => {
+      // Real-world bug this guards against: getBlob() used to do
+      // fetch(blobCache.get(id)) on a cache hit -- a fetch() call against a
+      // blob: URL. Safari enforces connect-src against blob: fetches (Chrome
+      // mostly doesn't), so with a CSP that only allowed connect-src 'self',
+      // every second copy/download of the same item failed on Safari with
+      // exactly "Load failed". Fixed by caching the actual Blob object, not
+      // just its URL, so a cache hit never calls fetch() at all.
+      const fileContent = Buffer.from('some file content for the cache test');
+      harness.state.rooms['cache-room'] = {
+        items: [makeFileItem('cf1', Date.now(), 'doc.pdf', fileContent)]
+      };
+      harness.fileBytes['cf1'] = fileContent;
+
+      window.document.getElementById('codeInput').value = 'cache-room';
+      window.document.getElementById('joinBtn').click();
+      await tick();
+      harness.pending.find((p) => p.room === 'cache-room').resolve();
+      await tick();
+
+      // First download: expect a real chunk fetch to have happened.
+      const requestsBefore = harness.pending.length;
+      const downloadBtn = [...window.document.querySelectorAll('#items .itemActions .btn')].find(b => /Download/i.test(b.textContent));
+      assert.ok(downloadBtn, 'expected a Download button on the file item');
+      downloadBtn.click();
+      await tick(50);
+
+      // Second download of the SAME item: must not issue any new request at
+      // all (chunk or otherwise) -- it should be served entirely from the
+      // in-memory blob cache.
+      const pendingCountAfterFirst = harness.pending.length;
+      downloadBtn.click();
+      await tick(50);
+      const pendingCountAfterSecond = harness.pending.length;
+      assert.strictEqual(pendingCountAfterSecond, pendingCountAfterFirst,
+        `second download issued ${pendingCountAfterSecond - pendingCountAfterFirst} new request(s) -- cache hit should need zero`);
+    });
+    window.close();
+  }
+
+  // -------------------------------------------------------------------
   section('Download all as ZIP: real end-to-end pipeline');
   {
     const fs = require('fs');
